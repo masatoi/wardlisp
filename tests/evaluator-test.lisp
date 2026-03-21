@@ -33,7 +33,11 @@
 ;; --- Let ---
 (deftest test-eval-let
   (ok (= 42 (eval1 "(let ((x 42)) x)")))
-  (ok (= 3 (eval1 "(let ((x 1) (y 2)) (+ x y))"))))
+  (ok (= 3 (eval1 "(let ((x 1) (y 2)) (+ x y))")))
+  ;; Sequential binding (Clojure-style): earlier bindings visible to later ones
+  (ok (= 2 (eval1 "(let ((x 1) (y (+ x 1))) y)")))
+  ;; let* is an alias for let
+  (ok (= 2 (eval1 "(let* ((x 1) (y (+ x 1))) y)"))))
 
 ;; --- Lambda & application ---
 (deftest test-eval-lambda

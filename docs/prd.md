@@ -245,7 +245,7 @@
 * `cond`
 * `and`
 * `or`
-* `let*`
+* `let*` (`let` の別名として受け付ける。`let` は逐次束縛)
 
 ### 初期版で禁止するもの
 
@@ -413,18 +413,18 @@
 
 実行系は、少なくとも以下のエラーを区別して返せること。
 
-* ParseError
-* SyntaxError
-* NameError
-* TypeError
-* ArityError
-* StepLimitExceeded
-* RecursionLimitExceeded
-* MemoryLimitExceeded
-* IntegerLimitExceeded
-* OutputLimitExceeded
-* TimeoutExceeded
-* InternalError
+* parse-error
+* syntax-error
+* name-error
+* type-error
+* arity-error
+* step-limit-exceeded
+* recursion-limit-exceeded
+* memory-limit-exceeded
+* integer-limit-exceeded
+* output-limit-exceeded
+* timeout-exceeded
+* internal-error
 
 ### エラー返却要件
 

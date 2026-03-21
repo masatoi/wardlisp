@@ -84,23 +84,9 @@
             nil))))
 
 (defun eval-let (args env ctx)
-  "Evaluate a let form with parallel bindings."
+  "Evaluate a let form with sequential bindings (Clojure-style)."
   (when (< (length args) 2)
     (error 'omoikane-arity-error :message "let requires bindings and body"))
-  (let* ((bindings (first args))
-         (body (rest args))
-         (names (mapcar #'first bindings))
-         (values (mapcar (lambda (b) (omoikane-eval (second b) env ctx))
-                         bindings))
-         (new-env (env-extend env names values)))
-    (let ((result nil))
-      (dolist (expr body result)
-        (setf result (omoikane-eval expr new-env ctx))))))
-
-(defun eval-let* (args env ctx)
-  "Evaluate a let* form with sequential bindings."
-  (when (< (length args) 2)
-    (error 'omoikane-arity-error :message "let* requires bindings and body"))
   (let ((bindings (first args))
         (body (rest args))
         (current-env env))
@@ -112,6 +98,10 @@
     (let ((result nil))
       (dolist (expr body result)
         (setf result (omoikane-eval expr current-env ctx))))))
+
+(defun eval-let* (args env ctx)
+  "Evaluate a let* form (alias for let)."
+  (eval-let args env ctx))
 
 (defun eval-lambda (args env)
   "Evaluate a lambda form, creating a closure."
