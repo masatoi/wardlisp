@@ -3,10 +3,17 @@
   :author ""
   :license ""
   :depends-on ()
+  :serial t
   :components ((:module "src"
+                :serial t
                 :components
-                ((:file "main"))))
-  :description ""
+                ((:file "types")
+                 (:file "reader")
+                 (:file "env")
+                 (:file "builtins")
+                 (:file "evaluator")
+                 (:file "main"))))
+  :description "Restricted Lisp evaluator for educational games"
   :in-order-to ((test-op (test-op "omoikane-lisp/tests"))))
 
 (defsystem "omoikane-lisp/tests"
@@ -14,8 +21,15 @@
   :license ""
   :depends-on ("omoikane-lisp"
                "rove")
+  :serial t
   :components ((:module "tests"
+                :serial t
                 :components
-                ((:file "main"))))
+                ((:file "types-test")
+                 (:file "reader-test")
+                 (:file "env-test")
+                 (:file "evaluator-test")
+                 (:file "safety-test")
+                 (:file "integration-test"))))
   :description "Test system for omoikane-lisp"
   :perform (test-op (op c) (symbol-call :rove :run c)))

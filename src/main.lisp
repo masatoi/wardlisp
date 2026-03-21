@@ -1,5 +1,6 @@
-(defpackage omoikane-lisp
-  (:use :cl))
+(defpackage :omoikane-lisp
+  (:use :cl)
+  (:export #:evaluate))
+
 (in-package :omoikane-lisp)
 
-;; blah blah blah.
