@@ -30,6 +30,7 @@
            ;; Other
            (cons "not" (make-builtin "not" #'builtin-not 1))
            (cons "eq?" (make-builtin "eq?" #'builtin-eq-p 2))
+           (cons "equal?" (make-builtin "equal?" #'builtin-equal-p 2))
            (cons "print" (make-builtin "print" #'builtin-print 1)))))
     (list builtins)))
 
@@ -177,6 +178,25 @@
           ((and (stringp a) (stringp b)) (string= a b))
           (t (eql a b)))
         t nil)))
+
+(defun builtin-equal-p (args ctx)
+  "Built-in equal? function. Deep structural equality."
+  (declare (ignore ctx))
+  (if (wardlisp-equal (first args) (second args) 0) t nil))
+
+(defun wardlisp-equal (a b depth)
+  "Recursive structural comparison with depth limit."
+  (when (> depth 10000)
+    (error 'wardlisp-recursion-limit-exceeded
+           :message "equal?: comparison too deep"))
+  (cond
+    ((and (null a) (null b)) t)
+    ((and (eq a t) (eq b t)) t)
+    ((and (integerp a) (integerp b)) (cl:= a b))
+    ((and (ocons-p a) (ocons-p b))
+     (and (wardlisp-equal (ocons-ocar a) (ocons-ocar b) (1+ depth))
+          (wardlisp-equal (ocons-ocdr a) (ocons-ocdr b) (1+ depth))))
+    (t nil)))
 
 (defun builtin-print (args ctx)
   "Built-in print function. Append string representation to output buffer."
