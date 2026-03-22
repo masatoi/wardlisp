@@ -210,6 +210,14 @@
     (ok (eq t result))
     (ok (null (getf metrics :error-type)))))
 
+(deftest test-equal-symbols
+  (let ((result (evaluate "(equal? 'foo 'foo)")))
+    (ok (eq t result))))
+
+(deftest test-equal-symbol-lists
+  (let ((result (evaluate "(equal? '(a b c) '(a b c))")))
+    (ok (eq t result))))
+
 (deftest test-equal-negative
   (let ((result (evaluate "(equal? '(1 2) '(1 3))")))
     (ok (null result))))

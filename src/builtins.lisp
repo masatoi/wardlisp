@@ -222,6 +222,7 @@
     ((and (null a) (null b)) t)
     ((and (eq a t) (eq b t)) t)
     ((and (integerp a) (integerp b)) (cl:= a b))
+         ((and (stringp a) (stringp b)) (string= a b))
     ((and (ocons-p a) (ocons-p b))
      (and (wardlisp-equal (ocons-ocar a) (ocons-ocar b) (1+ depth))
           (wardlisp-equal (ocons-ocdr a) (ocons-ocdr b) (1+ depth))))
