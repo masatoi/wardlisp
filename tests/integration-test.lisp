@@ -93,3 +93,49 @@
     (define (sum-of-squares a b) (+ (square a) (square b)))
     (sum-of-squares 3 4)")))
     (ok (= 25 result))))
+
+;;; --- Coverage: evaluate returns metrics on various errors ---
+(deftest test-evaluate-parse-error
+  (multiple-value-bind (result metrics)
+      (evaluate "(+ 1")
+    (ok (null result))
+    (ok (eq 'omoikane-parse-error (getf metrics :error-type)))
+    (ok (stringp (getf metrics :error-message)))))
+
+(deftest test-evaluate-type-error
+  (multiple-value-bind (result metrics)
+      (evaluate "(+ 1 t)")
+    (ok (null result))
+    (ok (eq 'omoikane-type-error (getf metrics :error-type)))))
+
+(deftest test-evaluate-arity-error
+  (multiple-value-bind (result metrics)
+      (evaluate "((lambda (x) x) 1 2)")
+    (ok (null result))
+    (ok (eq 'omoikane-arity-error (getf metrics :error-type)))))
+
+;;; --- Coverage: evaluate with output ---
+(deftest test-evaluate-output
+  (multiple-value-bind (result metrics)
+      (evaluate "(print 42)")
+    (ok (= 42 result))
+    (ok (stringp (getf metrics :output)))
+    (ok (search "42" (getf metrics :output)))))
+
+;;; --- Coverage: evaluate with all metrics ---
+(deftest test-evaluate-full-metrics
+  (multiple-value-bind (result metrics)
+      (evaluate "(cons 1 (cons 2 nil))")
+    (ok (ocons-p result))
+    (ok (>= (getf metrics :cons-allocated) 2))
+    (ok (>= (getf metrics :fuel-remaining) 0))
+    (ok (null (getf metrics :error-type)))
+    (ok (null (getf metrics :error-message)))))
+
+;;; --- Coverage: evaluate with defaults (exercises default keyword params) ---
+(deftest test-evaluate-defaults
+  ;; Call evaluate with only code, no keyword args, to exercise default params
+  (multiple-value-bind (result metrics)
+      (evaluate "(+ 1 1)")
+    (ok (= 2 result))
+    (ok (integerp (getf metrics :steps-used)))))

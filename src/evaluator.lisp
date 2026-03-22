@@ -46,6 +46,7 @@
           ((string= head "lambda") (eval-lambda args env))
           ((string= head "define") (eval-define args env ctx))
           ((string= head "cond")   (eval-cond args env ctx))
+          ((string= head "begin")  (eval-begin args env ctx))
           ((string= head "and")    (eval-and args env ctx))
           ((string= head "or")     (eval-or args env ctx))
           (t (eval-application head args env ctx)))
@@ -140,6 +141,12 @@
          value))
       (t (error 'omoikane-parse-error
                 :message (format nil "Invalid define target: ~s" target))))))
+
+(defun eval-begin (args env ctx)
+  "Evaluate a begin form. Returns the value of the last expression."
+  (let ((result nil))
+    (dolist (expr args result)
+      (setf result (omoikane-eval expr env ctx)))))
 
 (defun eval-cond (clauses env ctx)
   "Evaluate a cond form."

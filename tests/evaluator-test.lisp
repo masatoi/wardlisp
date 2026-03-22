@@ -134,3 +134,137 @@
 (deftest test-builtin-eqp
   (ok (eq t (eval1 "(eq? 1 1)")))
   (ok (eq nil (eval1 "(eq? 1 2)"))))
+
+;;; --- Coverage: quote arity error ---
+(deftest test-eval-quote-arity
+  (ok (signals (eval1 "(quote)") 'omoikane-arity-error))
+  (ok (signals (eval1 "(quote a b)") 'omoikane-arity-error)))
+
+;;; --- Coverage: quote with boolean literals ---
+(deftest test-eval-quote-boolean
+  (ok (eq t (eval1 "'t")))
+  (ok (eq nil (eval1 "'nil"))))
+
+;;; --- Coverage: if arity error ---
+(deftest test-eval-if-arity
+  (ok (signals (eval1 "(if)") 'omoikane-arity-error))
+  (ok (signals (eval1 "(if t)") 'omoikane-arity-error))
+  (ok (signals (eval1 "(if t 1 2 3)") 'omoikane-arity-error)))
+
+;;; --- Coverage: let arity error ---
+(deftest test-eval-let-arity
+  (ok (signals (eval1 "(let ())") 'omoikane-arity-error)))
+
+;;; --- Coverage: lambda arity error and multi-body ---
+(deftest test-eval-lambda-arity
+  (ok (signals (eval1 "(lambda)") 'omoikane-arity-error))
+  (ok (signals (eval1 "(lambda (x))") 'omoikane-arity-error)))
+
+(deftest test-eval-lambda-multi-body
+  (ok (= 3 (eval1 "((lambda (x) 1 2 (+ x 1)) 2)"))))
+
+;;; --- Coverage: define variable form ---
+(deftest test-eval-define-variable
+  (ok (= 42 (eval1 "(define x 42) x")))
+  (ok (= 15 (eval1 "(define x 10) (+ x 5)"))))
+
+;;; --- Coverage: define multi-body function ---
+(deftest test-eval-define-multi-body
+  (ok (= 42 (eval1 "(define (f x) 1 2 x) (f 42)"))))
+
+;;; --- Coverage: define invalid target ---
+(deftest test-eval-define-invalid-target
+  (ok (signals (eval1 "(define 42 10)") 'omoikane-parse-error)))
+
+;;; --- Coverage: cond body-less clause returning test value ---
+(deftest test-eval-cond-bodyless
+  (ok (= 42 (eval1 "(cond (42))")))
+  (ok (eq t (eval1 "(cond (nil 1) (t))"))))
+
+;;; --- Coverage: builtin arity error ---
+(deftest test-builtin-arity-error
+  (ok (signals (eval1 "(car 1 2)") 'omoikane-arity-error))
+  (ok (signals (eval1 "(cdr 1 2)") 'omoikane-arity-error))
+  (ok (signals (eval1 "(not 1 2)") 'omoikane-arity-error))
+  (ok (signals (eval1 "(null? 1 2)") 'omoikane-arity-error)))
+
+;;; --- Coverage: non-function call ---
+(deftest test-non-function-call
+  (ok (signals (eval1 "(42)") 'omoikane-type-error))
+  (ok (signals (eval1 "(t 1)") 'omoikane-type-error)))
+
+;;; --- Coverage: comparison builtins <=, >, >= ---
+(deftest test-builtin-le
+  (ok (eq t (eval1 "(<= 1 2)")))
+  (ok (eq t (eval1 "(<= 2 2)")))
+  (ok (eq nil (eval1 "(<= 3 2)"))))
+
+(deftest test-builtin-gt
+  (ok (eq t (eval1 "(> 2 1)")))
+  (ok (eq nil (eval1 "(> 1 2)")))
+  (ok (eq nil (eval1 "(> 2 2)"))))
+
+(deftest test-builtin-ge
+  (ok (eq t (eval1 "(>= 2 1)")))
+  (ok (eq t (eval1 "(>= 2 2)")))
+  (ok (eq nil (eval1 "(>= 1 2)"))))
+
+;;; --- Coverage: sub zero args ---
+(deftest test-builtin-sub-zero-args
+  (ok (signals (eval1 "(-)") 'omoikane-arity-error)))
+
+;;; --- Coverage: div/mod zero division ---
+(deftest test-builtin-div-zero
+  (ok (signals (eval1 "(div 1 0)") 'omoikane-type-error)))
+
+(deftest test-builtin-mod-zero
+  (ok (signals (eval1 "(mod 1 0)") 'omoikane-type-error)))
+
+;;; --- Coverage: car/cdr of nil ---
+(deftest test-builtin-car-nil
+  (ok (eq nil (eval1 "(car nil)"))))
+
+(deftest test-builtin-cdr-nil
+  (ok (eq nil (eval1 "(cdr nil)"))))
+
+;;; --- Coverage: eq? with symbols and other types ---
+(deftest test-builtin-eqp-symbols
+  (ok (eq t (eval1 "(eq? 'a 'a)")))
+  (ok (eq nil (eval1 "(eq? 'a 'b)")))
+  (ok (eq t (eval1 "(eq? t t)")))
+  (ok (eq nil (eval1 "(eq? t nil)")))
+  (ok (eq nil (eval1 "(eq? 1 'a)"))))
+
+;;; --- Coverage: print-value for various types ---
+(deftest test-eval-print-various
+  (ok (= 42 (eval1 "(print 42)")))
+  (ok (eq t (eval1 "(print t)")))
+  (ok (eq nil (eval1 "(print nil)")))
+  ;; Print a list (exercises print-ocons)
+  (let ((result (eval1 "(print (list 1 2 3))")))
+    (ok (ocons-p result)))
+  ;; Print a dotted pair (exercises dotted-pair branch)
+  (let ((result (eval1 "(print (cons 1 2))")))
+    (ok (ocons-p result)))
+  ;; Print a symbol
+  (ok (equal "hello" (eval1 "(print 'hello)")))
+  ;; Print a lambda (exercises closure printing)
+  (let ((result (eval1 "(print (lambda (x) x))")))
+    (ok (closure-p result)))
+  ;; Print a builtin (exercises builtin printing)
+  (let ((result (eval1 "(print +)")))
+    (ok (builtin-p result))))
+
+;;; --- Coverage: computed operator (non-string head) ---
+(deftest test-eval-computed-operator
+  (ok (= 3 (eval1 "((if t + -) 1 2)"))))
+
+;;; --- Coverage: begin special form ---
+(deftest test-eval-begin
+  (ok (= 3 (eval1 "(begin 1 2 3)")))
+  (ok (eq nil (eval1 "(begin)"))))
+
+;;; --- Coverage: eval-string with defaults ---
+(deftest test-eval-string-defaults
+  ;; Call eval-string with no keyword args to exercise default parameter values
+  (ok (= 3 (eval-string "(+ 1 2)"))))

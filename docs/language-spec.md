@@ -349,6 +349,19 @@ y                   ;=> name-error: Undefined variable: y
 (or)              ;=> nil
 ```
 
+### 5.9 begin
+
+```
+(begin expr1 expr2 ...)
+```
+
+式を順に評価し、最後の式の値を返す。引数なしの `(begin)` は `nil` を返す。`lambda` や `define` の複数本体は暗黙の `begin` に変換される。
+
+```scheme
+(begin 1 2 3)     ;=> 3
+(begin)           ;=> nil
+```
+
 ---
 
 ## 6. 関数適用
@@ -617,7 +630,7 @@ Omoikane Lisp は実行中の資源消費を追跡し、制限を超えた場合
 * **代入** -- `set!`, `setf`, `setq`
 * **ループ** -- `loop`, `do`, `dotimes`, `dolist`
 * **制御フロー** -- `tagbody`, `go`, `catch`, `throw`, `block`, `return`
-* **副作用** -- `progn` / `begin` (暗黙の begin は lambda/define 本体内のみ)
+* **副作用** -- `progn` (`begin` は特殊形式としてサポート)
 * **自己評価** -- `eval`, `apply`
 * **入出力** -- ファイル、ネットワーク、OS コマンド
 * **パッケージ** -- パッケージ操作、パッケージ接頭辞

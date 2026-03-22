@@ -25,3 +25,8 @@
   (let ((env (env-extend nil '("x") '(1))))
     (env-set! env "x" 42)
     (ok (= 42 (env-lookup env "x")))))
+
+(deftest test-env-set-undefined
+  (ok (signals (env-set! nil "x" 1) 'omoikane-name-error))
+  (let ((env (env-extend nil '("y") '(1))))
+    (ok (signals (env-set! env "x" 42) 'omoikane-name-error))))

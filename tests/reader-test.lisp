@@ -57,3 +57,34 @@
 (deftest test-read-reject-reader-macro
   (ok (signals (omoikane-read "#.42") 'omoikane-parse-error))
   (ok (signals (omoikane-read "#'car") 'omoikane-parse-error)))
+
+;;; --- Coverage: empty input ---
+(deftest test-read-empty-input
+  (ok (signals (omoikane-read "") 'omoikane-parse-error))
+  (ok (signals (omoikane-read "   ") 'omoikane-parse-error))
+  (ok (signals (omoikane-read "; just a comment") 'omoikane-parse-error)))
+
+;;; --- Coverage: empty program ---
+(deftest test-read-empty-program
+  (ok (equal nil (omoikane-read-program "")))
+  (ok (equal nil (omoikane-read-program "  ; only comments  "))))
+
+;;; --- Coverage: integer with + prefix ---
+(deftest test-read-positive-integer
+  (ok (= 7 (omoikane-read "+7"))))
+
+;;; --- Coverage: whitespace variants ---
+(deftest test-read-whitespace-variants
+  ;; Tab
+  (ok (= 42 (omoikane-read (format nil "~c42" #\Tab))))
+  ;; Carriage return
+  (ok (= 42 (omoikane-read (format nil "~c42" #\Return))))
+  ;; Multiple comments
+  (ok (= 1 (omoikane-read "; comment 1
+; comment 2
+1"))))
+
+;;; --- Coverage: case normalization ---
+(deftest test-read-case-normalization
+  (ok (equal "hello" (omoikane-read "HELLO")))
+  (ok (equal "mixed" (omoikane-read "MiXeD"))))
