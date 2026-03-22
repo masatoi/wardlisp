@@ -134,8 +134,9 @@
   (ok (signals (eval-safe ":keyword") 'wardlisp-parse-error)))
 
 ;; --- Evaluator escape attempt regression tests ---
-(deftest test-no-apply
-  (ok (signals (eval-safe "(apply + '(1 2))") 'wardlisp-name-error)))
+
+(deftest test-apply-is-safe
+  (ok (eql 3 (eval-safe "(apply + '(1 2))" :fuel 1000))))
 
 (deftest test-no-funcall
   (ok (signals (eval-safe "(funcall + 1 2)") 'wardlisp-name-error)))

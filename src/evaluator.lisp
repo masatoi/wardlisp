@@ -76,6 +76,7 @@ Use wardlisp-eval when you need a fully resolved value."
           ((string= head "begin")  (eval-begin args env ctx))
           ((string= head "and")    (eval-and args env ctx))
           ((string= head "or")     (eval-or args env ctx))
+          ((string= head "apply") (eval-apply args env ctx))
           (t (eval-application head args env ctx)))
         (eval-application head args env ctx))))
 
@@ -216,6 +217,21 @@ Last argument is in tail position (use eval-inner)."
             when result return result)))
 
 ;;; --- Function application ---
+
+(defun eval-apply (args env ctx)
+  "Evaluate (apply func arg-list). Converts ocons list to args and dispatches."
+  (when (/= (length args) 2)
+    (error 'wardlisp-arity-error :message "apply requires exactly 2 arguments"))
+  (let ((func (wardlisp-eval (first args) env ctx))
+        (arg-list (wardlisp-eval (second args) env ctx)))
+    (let ((cl-args nil))
+      (loop while (ocons-p arg-list)
+            do (push (ocons-ocar arg-list) cl-args)
+               (setf arg-list (ocons-ocdr arg-list)))
+      (when arg-list
+        (error 'wardlisp-type-error
+               :message "apply: second argument must be a proper list"))
+      (apply-function func (nreverse cl-args) ctx))))
 
 (defun eval-application (operator args env ctx)
   "Evaluate a function call."
