@@ -203,3 +203,44 @@
       (if (= n 0) 1 (* n (fact (- n 1)))))
     (fact 10)")))
     (ok (= 3628800 result))))
+
+(deftest test-equal-deep
+  (multiple-value-bind (result metrics)
+      (evaluate "(equal? '(1 (2 3) 4) '(1 (2 3) 4))")
+    (ok (eq t result))
+    (ok (null (getf metrics :error-type)))))
+
+(deftest test-equal-negative
+  (let ((result (evaluate "(equal? '(1 2) '(1 3))")))
+    (ok (null result))))
+
+(deftest test-equal-grading-use-case
+  (let ((result (evaluate "
+    (define (insert x lst)
+      (cond ((null? lst) (list x))
+            ((<= x (car lst)) (cons x lst))
+            (t (cons (car lst) (insert x (cdr lst))))))
+    (define (my-sort lst)
+      (if (null? lst) nil
+          (insert (car lst) (my-sort (cdr lst)))))
+    (equal? (my-sort '(3 1 4 1 5 9 2 6)) '(1 1 2 3 4 5 6 9))"
+    :fuel 100000 :max-depth 200 :max-cons 10000)))
+    (ok (eq t result))))
+
+(deftest test-append-basic
+  (let ((result (evaluate "(equal? (append '(1 2) '(3 4)) '(1 2 3 4))"
+                          :max-cons 100)))
+    (ok (eq t result))))
+
+(deftest test-append-variadic
+  (let ((result (evaluate "(equal? (append '(1) '(2) '(3)) '(1 2 3))"
+                          :max-cons 100)))
+    (ok (eq t result))))
+
+(deftest test-apply-builtin
+  (let ((result (evaluate "(apply + '(1 2 3))")))
+    (ok (= 6 result))))
+
+(deftest test-apply-closure
+  (let ((result (evaluate "(apply (lambda (x y) (+ x y)) '(3 4))")))
+    (ok (= 7 result))))
