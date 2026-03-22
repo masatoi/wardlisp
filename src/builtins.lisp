@@ -27,6 +27,7 @@
            (cons "null?" (make-builtin "null?" #'builtin-null-p 1))
            (cons "atom?" (make-builtin "atom?" #'builtin-atom-p 1))
            (cons "length" (make-builtin "length" #'builtin-length 1))
+           (cons "append" (make-builtin "append" #'builtin-append nil))
            ;; Other
            (cons "not" (make-builtin "not" #'builtin-not 1))
            (cons "eq?" (make-builtin "eq?" #'builtin-eq-p 2))
@@ -161,6 +162,34 @@
     (loop while (ocons-p lst)
           do (incf count) (setf lst (ocons-ocdr lst)))
     count))
+
+(defun builtin-append (args ctx)
+  "Built-in append function. Concatenate zero or more lists."
+  (if (null args)
+      nil
+      (let ((result (car (last args))))
+        (loop for lst in (nreverse (butlast args))
+              do (setf result (ocons-prepend lst result ctx)))
+        result)))
+
+(defun ocons-prepend (lst tail ctx)
+  "Copy ocons list LST and attach TAIL at the end. Iterative."
+  (if (null lst)
+      tail
+      (progn
+        (unless (ocons-p lst)
+          (error 'wardlisp-type-error
+                 :message (format nil "append: expected list, got ~a" (print-value lst))))
+        (let* ((head (progn (track-cons ctx) (make-ocons (ocons-ocar lst) nil)))
+               (current head))
+          (setf lst (ocons-ocdr lst))
+          (loop while (ocons-p lst)
+                do (let ((new (progn (track-cons ctx) (make-ocons (ocons-ocar lst) nil))))
+                     (setf (ocons-ocdr current) new)
+                     (setf current new)
+                     (setf lst (ocons-ocdr lst))))
+          (setf (ocons-ocdr current) tail)
+          head))))
 
 ;;; --- Other ---
 
