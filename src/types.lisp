@@ -6,6 +6,9 @@
    ;; Closure
    #:closure #:make-closure #:closure-p
    #:closure-params #:closure-body #:closure-env #:closure-name
+   ;; Tail call (trampoline)
+   #:tail-call #:make-tail-call #:tail-call-p
+   #:tail-call-expr #:tail-call-env
    ;; Builtin
    #:builtin #:make-builtin #:builtin-p
    #:builtin-name #:builtin-func #:builtin-arity
@@ -49,6 +52,11 @@
   body
   env
   (name nil))
+
+(defstruct (tail-call (:constructor make-tail-call (&key expr env)))
+  "Represents a pending tail call for trampoline evaluation."
+  expr
+  env)
 
 ;;; --- Builtin function ---
 
