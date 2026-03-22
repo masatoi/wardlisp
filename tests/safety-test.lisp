@@ -115,3 +115,43 @@
   (ok (signals (eval-safe ",x") 'wardlisp-parse-error))
   (ok (signals (eval-safe "\\x") 'wardlisp-parse-error))
   (ok (signals (eval-safe "|x|") 'wardlisp-parse-error)))
+
+;; --- Reader attack regression tests ---
+(deftest test-reader-blocks-hash-dot
+  (ok (signals (eval-safe "#.(+ 1 2)") 'wardlisp-parse-error)))
+
+(deftest test-reader-blocks-hash-quote
+  (ok (signals (eval-safe "#'car") 'wardlisp-parse-error)))
+
+(deftest test-reader-blocks-hash-paren
+  (ok (signals (eval-safe "#(1 2 3)") 'wardlisp-parse-error)))
+
+(deftest test-reader-blocks-package-prefix
+  (ok (signals (eval-safe "cl:open") 'wardlisp-parse-error))
+  (ok (signals (eval-safe "sb-ext:run-program") 'wardlisp-parse-error)))
+
+(deftest test-reader-blocks-keyword
+  (ok (signals (eval-safe ":keyword") 'wardlisp-parse-error)))
+
+;; --- Evaluator escape attempt regression tests ---
+(deftest test-no-apply
+  (ok (signals (eval-safe "(apply + '(1 2))") 'wardlisp-name-error)))
+
+(deftest test-no-funcall
+  (ok (signals (eval-safe "(funcall + 1 2)") 'wardlisp-name-error)))
+
+(deftest test-no-load
+  (ok (signals (eval-safe "(load foo)") 'wardlisp-name-error)))
+
+(deftest test-no-compile
+  (ok (signals (eval-safe "(compile nil)") 'wardlisp-name-error)))
+
+(deftest test-no-intern
+  (ok (signals (eval-safe "(intern x)") 'wardlisp-name-error)))
+
+;; --- Builtin integrity ---
+(deftest test-builtin-not-overwritable-by-define
+  (ok (eql 3 (eval-safe "(define + 42) (+ 1 2)" :fuel 1000))))
+
+(deftest test-builtin-shadowed-by-let-is-safe
+  (ok (signals (eval-safe "(let ((+ 42)) (+ 1 2))") 'wardlisp-type-error)))
