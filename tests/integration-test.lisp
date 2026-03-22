@@ -157,3 +157,49 @@
     (count-down 50000)"
     :fuel 5000000 :max-depth 200)))
     (ok (= 0 result))))
+
+(deftest test-tail-call-in-let
+  (let ((result (evaluate "
+    (define (f n)
+      (let ((x (+ n 1)))
+        (if (= x 100) x (f x))))
+    (f 0)"
+    :fuel 100000 :max-depth 50)))
+    (ok (= 100 result))))
+
+(deftest test-tail-call-in-begin
+  (let ((result (evaluate "
+    (define (f n)
+      (begin
+        (+ 1 1)
+        (if (= n 0) 42 (f (- n 1)))))
+    (f 10000)"
+    :fuel 1000000 :max-depth 50)))
+    (ok (= 42 result))))
+
+(deftest test-tail-call-in-cond
+  (let ((result (evaluate "
+    (define (classify n)
+      (cond ((= n 0) 0)
+            ((< n 0) (classify (+ n 1)))
+            (t (classify (- n 1)))))
+    (classify 5000)"
+    :fuel 1000000 :max-depth 50)))
+    (ok (= 0 result))))
+
+(deftest test-mutual-like-tail-recursion
+  (let ((result (evaluate "
+    (define (even? n)
+      (if (= n 0) t (odd? (- n 1))))
+    (define (odd? n)
+      (if (= n 0) nil (even? (- n 1))))
+    (even? 1000)"
+    :fuel 1000000 :max-depth 50)))
+    (ok (eq t result))))
+
+(deftest test-non-tail-recursion-still-works
+  (let ((result (evaluate "
+    (define (fact n)
+      (if (= n 0) 1 (* n (fact (- n 1)))))
+    (fact 10)")))
+    (ok (= 3628800 result))))
