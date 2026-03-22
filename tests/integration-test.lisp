@@ -155,5 +155,5 @@
       (if (= n 0) 0
           (count-down (- n 1))))
     (count-down 50000)"
-    :fuel 1000000 :max-depth 200)))
+    :fuel 5000000 :max-depth 200)))
     (ok (= 0 result))))

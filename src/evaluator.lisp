@@ -23,7 +23,28 @@
         (setf result (wardlisp-eval expr env ctx))))))
 
 (defun wardlisp-eval (expr env ctx)
-  "Evaluate EXPR in ENV with execution context CTX."
+  "Evaluate EXPR in ENV with execution context CTX.
+Resolves all tail-calls via trampoline. Always returns a final value."
+  (let ((result (eval-inner expr env ctx)))
+    (if (tail-call-p result)
+        (trampoline result ctx)
+        result)))
+
+(defun trampoline (tc ctx)
+  "Resolve a chain of tail-calls in constant stack space."
+  (track-depth ctx 1)
+  (unwind-protect
+       (loop
+         (consume-fuel ctx)
+         (let ((result (eval-inner (tail-call-expr tc) (tail-call-env tc) ctx)))
+           (if (tail-call-p result)
+               (setf tc result)
+               (return result))))
+    (track-depth ctx -1)))
+
+(defun eval-inner (expr env ctx)
+  "Single-step evaluation. May return tail-call structs for closure applications.
+Use wardlisp-eval when you need a fully resolved value."
   (consume-fuel ctx)
   (cond
     ((integerp expr) (check-integer ctx expr))
@@ -79,18 +100,20 @@
         (t ast)))
 
 (defun eval-if (args env ctx)
-  "Evaluate an if form with 2 or 3 arguments."
+  "Evaluate an if form with 2 or 3 arguments.
+Then/else branches are in tail position (use eval-inner)."
   (let ((len (length args)))
     (when (or (< len 2) (> len 3))
       (error 'wardlisp-arity-error :message "if requires 2 or 3 arguments"))
     (if (wardlisp-eval (first args) env ctx)
-        (wardlisp-eval (second args) env ctx)
+        (eval-inner (second args) env ctx)
         (if (= len 3)
-            (wardlisp-eval (third args) env ctx)
+            (eval-inner (third args) env ctx)
             nil))))
 
 (defun eval-let (args env ctx)
-  "Evaluate a let form with sequential bindings (Clojure-style)."
+  "Evaluate a let form with sequential bindings.
+Last body expression is in tail position (use eval-inner)."
   (when (< (length args) 2)
     (error 'wardlisp-arity-error :message "let requires bindings and body"))
   (let ((bindings (first args))
@@ -102,8 +125,11 @@
                                       (list (first binding))
                                       (list val)))))
     (let ((result nil))
-      (dolist (expr body result)
-        (setf result (wardlisp-eval expr current-env ctx))))))
+      (loop for (expr . rest) on body
+            do (setf result (if rest
+                                (wardlisp-eval expr current-env ctx)
+                                (eval-inner expr current-env ctx))))
+      result)))
 
 (defun eval-let* (args env ctx)
   "Evaluate a let* form (alias for let)."
@@ -148,34 +174,46 @@
                 :message (format nil "Invalid define target: ~s" target))))))
 
 (defun eval-begin (args env ctx)
-  "Evaluate a begin form. Returns the value of the last expression."
+  "Evaluate a begin form.
+Last expression is in tail position (use eval-inner)."
   (let ((result nil))
-    (dolist (expr args result)
-      (setf result (wardlisp-eval expr env ctx)))))
+    (loop for (expr . rest) on args
+          do (setf result (if rest
+                              (wardlisp-eval expr env ctx)
+                              (eval-inner expr env ctx))))
+    result))
 
 (defun eval-cond (clauses env ctx)
-  "Evaluate a cond form."
+  "Evaluate a cond form.
+Result expressions are in tail position (use eval-inner)."
   (dolist (clause clauses nil)
     (let ((test-result (wardlisp-eval (first clause) env ctx)))
       (when test-result
         (return (if (rest clause)
-                    (wardlisp-eval (second clause) env ctx)
+                    (eval-inner (second clause) env ctx)
                     test-result))))))
 
 (defun eval-and (args env ctx)
-  "Evaluate an and form with short-circuit semantics."
+  "Evaluate an and form with short-circuit semantics.
+Last argument is in tail position (use eval-inner)."
   (if (null args) t
       (let ((result nil))
-        (dolist (arg args result)
-          (setf result (wardlisp-eval arg env ctx))
-          (unless result (return nil))))))
+        (loop for (arg . rest) on args
+              do (setf result (if rest
+                                  (wardlisp-eval arg env ctx)
+                                  (eval-inner arg env ctx)))
+              unless result return nil)
+        result)))
 
 (defun eval-or (args env ctx)
-  "Evaluate an or form with short-circuit semantics."
+  "Evaluate an or form with short-circuit semantics.
+Last argument is in tail position (use eval-inner)."
   (if (null args) nil
-      (dolist (arg args nil)
-        (let ((result (wardlisp-eval arg env ctx)))
-          (when result (return result))))))
+      (loop for (arg . rest) on args
+            for result = (if rest
+                             (wardlisp-eval arg env ctx)
+                             (eval-inner arg env ctx))
+            when result return result)))
 
 ;;; --- Function application ---
 
@@ -186,7 +224,7 @@
     (apply-function func evaluated-args ctx)))
 
 (defun apply-function (func args ctx)
-  "Apply FUNC to ARGS."
+  "Apply FUNC to ARGS. Returns tail-call struct for closures (trampolined)."
   (consume-fuel ctx 4)
   (cond
     ((closure-p func)
@@ -196,11 +234,8 @@
                 :message (format nil "~a expects ~d args, got ~d"
                                  (or (closure-name func) "lambda")
                                  (length params) (length args))))
-       (track-depth ctx 1)
-       (unwind-protect
-            (let ((call-env (env-extend (closure-env func) params args)))
-              (wardlisp-eval (closure-body func) call-env ctx))
-         (track-depth ctx -1))))
+       (let ((call-env (env-extend (closure-env func) params args)))
+         (make-tail-call :expr (closure-body func) :env call-env))))
     ((builtin-p func)
      (when (and (builtin-arity func)
                 (/= (builtin-arity func) (length args)))
