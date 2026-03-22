@@ -139,3 +139,21 @@
       (evaluate "(+ 1 1)")
     (ok (= 2 result))
     (ok (integerp (getf metrics :steps-used)))))
+
+(deftest test-tail-recursive-sum
+  (let ((result (evaluate "
+    (define (sum-iter n acc)
+      (if (= n 0) acc
+          (sum-iter (- n 1) (+ acc n))))
+    (sum-iter 10000 0)"
+    :fuel 1000000 :max-depth 200)))
+    (ok (= 50005000 result))))
+
+(deftest test-tail-recursive-no-stack-overflow
+  (let ((result (evaluate "
+    (define (count-down n)
+      (if (= n 0) 0
+          (count-down (- n 1))))
+    (count-down 50000)"
+    :fuel 1000000 :max-depth 200)))
+    (ok (= 0 result))))
