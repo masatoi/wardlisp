@@ -3,6 +3,9 @@
   (:export #:wardlisp-read #:wardlisp-read-program))
 (in-package :wardlisp/src/reader)
 
+(defconstant +max-parse-depth+ 1000
+  "Maximum nesting depth for S-expression parsing.")
+
 (defun wardlisp-read (input)
   "Read a single expression from INPUT string."
   (multiple-value-bind (expr pos) (read-expr input 0)
@@ -21,23 +24,29 @@
         (push expr exprs)
         (setf pos new-pos)))))
 
-(defun read-expr (input pos)
+(defun read-expr (input pos &optional (depth 0))
   "Parse one expression starting at POS. Returns (values expr new-pos)."
   (setf pos (skip-whitespace-and-comments input pos))
   (when (>= pos (length input))
     (error 'wardlisp-parse-error :message "Unexpected end of input"))
   (let ((ch (char input pos)))
     (cond
-      ((char= ch #\() (read-list input (1+ pos)))
-      ((char= ch #\)) (error 'wardlisp-parse-error
-                              :message "Unexpected closing parenthesis"))
-      ((char= ch #\') (read-quote input (1+ pos)))
-      ((char= ch #\#) (error 'wardlisp-parse-error
-                              :message "Reader macros (#) are not allowed"))
+      ((char= ch #\() (read-list input (1+ pos) (1+ depth)))
+      ((char= ch #\))
+       (error 'wardlisp-parse-error
+              :message "Unexpected closing parenthesis"))
+      ((char= ch #\') (read-quote input (1+ pos) depth))
+      ((char= ch #\#)
+       (error 'wardlisp-parse-error
+              :message "Reader macros (#) are not allowed"))
       (t (read-atom input pos)))))
 
-(defun read-list (input pos)
+(defun read-list (input pos &optional (depth 0))
   "Parse list body after opening paren. Returns (values list new-pos)."
+  (when (> depth +max-parse-depth+)
+    (error 'wardlisp-parse-error
+           :message (format nil "Nesting depth ~d exceeds limit ~d"
+                            depth +max-parse-depth+)))
   (let ((elements '()))
     (loop
       (setf pos (skip-whitespace-and-comments input pos))
@@ -45,13 +54,13 @@
         (error 'wardlisp-parse-error :message "Unterminated list"))
       (when (char= (char input pos) #\))
         (return (values (nreverse elements) (1+ pos))))
-      (multiple-value-bind (expr new-pos) (read-expr input pos)
+      (multiple-value-bind (expr new-pos) (read-expr input pos depth)
         (push expr elements)
         (setf pos new-pos)))))
 
-(defun read-quote (input pos)
+(defun read-quote (input pos &optional (depth 0))
   "Parse quoted expression after quote character."
-  (multiple-value-bind (expr new-pos) (read-expr input pos)
+  (multiple-value-bind (expr new-pos) (read-expr input pos depth)
     (values (list "quote" expr) new-pos)))
 
 (defun read-atom (input pos)

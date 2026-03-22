@@ -73,3 +73,14 @@
 (deftest test-no-mutation
   (ok (signals (eval-safe "(setf x 1)") 'wardlisp-name-error))
   (ok (signals (eval-safe "(setq x 1)") 'wardlisp-name-error)))
+
+;; --- Parse depth limit ---
+(deftest test-deep-nesting-parse-stops
+  (ok (signals
+       (eval-safe
+        (concatenate 'string
+          (make-string 10000 :initial-element #\()
+          "1"
+          (make-string 10000 :initial-element #\)))
+        :fuel 1000000)
+       'wardlisp-parse-error)))
