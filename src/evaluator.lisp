@@ -60,18 +60,17 @@
     (error 'wardlisp-arity-error :message "quote requires exactly 1 argument"))
   (ast-to-value (car args) ctx))
 
-(defun ast-to-value (ast ctx)
+(defun ast-to-value (ast ctx &optional (depth 0))
   "Convert a quoted AST to a runtime value (ocons chain for lists)."
-  (cond
-    ((null ast) nil)
-    ((integerp ast) (check-integer ctx ast))
-    ((eq ast t) t)
-    ((stringp ast) ast)
-    ((consp ast)
-     (track-cons ctx)
-     (make-ocons (ast-to-value (car ast) ctx)
-                 (ast-to-value (cdr ast) ctx)))
-    (t ast)))
+  (when (> depth +max-parse-depth+)
+    (error 'wardlisp-parse-error
+           :message "Quoted expression nesting too deep"))
+  (cond ((null ast) nil) ((integerp ast) (check-integer ctx ast))
+        ((eq ast t) t) ((stringp ast) ast)
+        ((consp ast) (track-cons ctx)
+         (make-ocons (ast-to-value (car ast) ctx (1+ depth))
+                     (ast-to-value (cdr ast) ctx (1+ depth))))
+        (t ast)))
 
 (defun eval-if (args env ctx)
   "Evaluate an if form with 2 or 3 arguments."

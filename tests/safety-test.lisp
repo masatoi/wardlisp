@@ -84,3 +84,15 @@
           (make-string 10000 :initial-element #\)))
         :fuel 1000000)
        'wardlisp-parse-error)))
+
+(deftest test-deep-quoted-list-stops
+  (ok (signals
+       (eval-safe
+        (concatenate 'string
+          "'("
+          (make-string 1000 :initial-element #\()
+          "1"
+          (make-string 1000 :initial-element #\))
+          ")")
+        :fuel 1000000 :max-cons 1000000)
+       'wardlisp-error)))

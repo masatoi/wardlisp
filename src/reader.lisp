@@ -1,6 +1,6 @@
 (defpackage :wardlisp/src/reader
   (:use :cl :wardlisp/src/types)
-  (:export #:wardlisp-read #:wardlisp-read-program))
+  (:export #:wardlisp-read #:wardlisp-read-program #:+max-parse-depth+))
 (in-package :wardlisp/src/reader)
 
 (defconstant +max-parse-depth+ 1000
