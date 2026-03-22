@@ -7,27 +7,27 @@
 
 ## Project Overview
 
-omoikane-lisp is a restricted Lisp dialect.
+wardlisp is a restricted Lisp dialect.
 
 ## Self-Hosted Development
 
-This project is developed using its own MCP tools. When working on omoikane-lisp:
+This project is developed using its own MCP tools. When working on wardlisp:
 
 - **Lisp code operations** (search, read, edit, eval): Use cl-mcp tools (`clgrep-search`, `lisp-read-file`, `lisp-edit-form`, `repl-eval`, etc.) per repl-driven-development.md
 - **Shell commands**: Only for `git`, `mallet` (linting), `rove` (test fallback), and user-requested commands
-- **Package naming**: Uses ASDF `package-inferred-system` — each file defines package `omoikane-lisp/src/<name>`. Add new files by updating `omoikane-lisp.asd` dependencies. Exports go in `main.lisp`
+- **Package naming**: Uses ASDF `package-inferred-system` — each file defines package `wardlisp/src/<name>`. Add new files by updating `wardlisp.asd` dependencies. Exports go in `main.lisp`
 
 ## Testing & Linting
 
-**Run tests** via `run-tests` tool with system name `omoikane-lisp/tests/<name>-test`:
+**Run tests** via `run-tests` tool with system name `wardlisp/tests/<name>-test`:
 ```lisp
 ;; Single test via repl-eval (fallback when package conflicts occur)
-(rove:run-test 'omoikane-lisp/tests/integration-test::repl-eval-printlength)
+(rove:run-test 'wardlisp/tests/integration-test::repl-eval-printlength)
 ```
 
-**Fallback** (stale image / package conflicts): `rove omoikane-lisp.asd` from Bash for a clean process.
+**Fallback** (stale image / package conflicts): `rove wardlisp.asd` from Bash for a clean process.
 
-**Pre-PR**: `(asdf:compile-system :omoikane-lisp :force t)` to catch warnings, then run full test suite.
+**Pre-PR**: `(asdf:compile-system :wardlisp :force t)` to catch warnings, then run full test suite.
 
 **Linting** (required before commit):
 ```bash

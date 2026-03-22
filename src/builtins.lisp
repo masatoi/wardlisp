@@ -1,7 +1,7 @@
-(defpackage :omoikane-lisp/src/builtins
-  (:use :cl :omoikane-lisp/src/types :omoikane-lisp/src/env)
+(defpackage :wardlisp/src/builtins
+  (:use :cl :wardlisp/src/types :wardlisp/src/env)
   (:export #:make-initial-env #:print-value))
-(in-package :omoikane-lisp/src/builtins)
+(in-package :wardlisp/src/builtins)
 
 (defun make-initial-env ()
   "Create the initial environment with all built-in functions."
@@ -38,13 +38,13 @@
 (defun ensure-integer (name value)
   "Ensure VALUE is an integer, or signal a type error."
   (unless (integerp value)
-    (error 'omoikane-type-error
+    (error 'wardlisp-type-error
            :message (format nil "~a: expected integer, got ~a" name (print-value value)))))
 
 (defun ensure-ocons (name value)
   "Ensure VALUE is an ocons pair, or signal a type error."
   (unless (ocons-p value)
-    (error 'omoikane-type-error
+    (error 'wardlisp-type-error
            :message (format nil "~a: expected pair, got ~a" name (print-value value)))))
 
 ;;; --- Arithmetic ---
@@ -57,7 +57,7 @@
 (defun builtin-sub (args ctx)
   "Built-in - function. Unary negation or variadic subtraction."
   (when (null args)
-    (error 'omoikane-arity-error :message "- requires at least 1 argument"))
+    (error 'wardlisp-arity-error :message "- requires at least 1 argument"))
   (dolist (a args) (ensure-integer "-" a))
   (check-integer ctx (if (= 1 (length args))
                          (- (first args))
@@ -72,7 +72,7 @@
   "Built-in div function. Integer division (truncate)."
   (dolist (a args) (ensure-integer "div" a))
   (when (zerop (second args))
-    (error 'omoikane-type-error :message "div: division by zero"))
+    (error 'wardlisp-type-error :message "div: division by zero"))
   (check-integer ctx (truncate (first args) (second args))))
 
 (defun builtin-mod (args ctx)
@@ -80,7 +80,7 @@
   (declare (ignore ctx))
   (dolist (a args) (ensure-integer "mod" a))
   (when (zerop (second args))
-    (error 'omoikane-type-error :message "mod: division by zero"))
+    (error 'wardlisp-type-error :message "mod: division by zero"))
   (cl:mod (first args) (second args)))
 
 ;;; --- Comparison ---
@@ -184,7 +184,7 @@
         (output (exec-ctx-output ctx)))
     (let ((str (print-value value)))
       (when (> (+ (length output) (length str) 1) (exec-ctx-max-output ctx))
-        (error 'omoikane-output-limit-exceeded
+        (error 'wardlisp-output-limit-exceeded
                :message "Output limit exceeded"))
       (loop for ch across str do (vector-push-extend ch output))
       (vector-push-extend #\Newline output))

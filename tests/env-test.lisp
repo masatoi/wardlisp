@@ -1,14 +1,14 @@
-(defpackage :omoikane-lisp/tests/env-test
-  (:use :cl :rove :omoikane-lisp/src/env :omoikane-lisp/src/types))
+(defpackage :wardlisp/tests/env-test
+  (:use :cl :rove :wardlisp/src/env :wardlisp/src/types))
 
-(in-package :omoikane-lisp/tests/env-test)
+(in-package :wardlisp/tests/env-test)
 
 (deftest test-env-lookup
   (let ((env (env-extend nil '("x") '(42))))
     (ok (= 42 (env-lookup env "x")))))
 
 (deftest test-env-lookup-missing
-  (ok (signals (env-lookup nil "x") 'omoikane-name-error)))
+  (ok (signals (env-lookup nil "x") 'wardlisp-name-error)))
 
 (deftest test-env-nested
   (let* ((outer (env-extend nil '("x") '(1)))
@@ -27,6 +27,6 @@
     (ok (= 42 (env-lookup env "x")))))
 
 (deftest test-env-set-undefined
-  (ok (signals (env-set! nil "x" 1) 'omoikane-name-error))
+  (ok (signals (env-set! nil "x" 1) 'wardlisp-name-error))
   (let ((env (env-extend nil '("y") '(1))))
-    (ok (signals (env-set! env "x" 42) 'omoikane-name-error))))
+    (ok (signals (env-set! env "x" 42) 'wardlisp-name-error))))

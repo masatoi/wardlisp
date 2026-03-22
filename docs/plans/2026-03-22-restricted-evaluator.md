@@ -4,7 +4,7 @@
 
 **Goal:** Implement a safe, restricted Lisp evaluator for educational games with step counting, recursion limits, and memory controls per `docs/prd.md`.
 
-**Architecture:** Tree-walking interpreter with a safe custom reader (not CL `read`). The reader produces an AST using CL native values (integers, strings for symbol names, CL lists for structure). Runtime values include custom `ocons` structs (for cons-cell counting) and `closure` structs. A mutable `exec-ctx` struct tracks fuel, recursion depth, and cons allocations. Lexical environments are linked alists. All errors are CL conditions under a common `omoikane-error` hierarchy.
+**Architecture:** Tree-walking interpreter with a safe custom reader (not CL `read`). The reader produces an AST using CL native values (integers, strings for symbol names, CL lists for structure). Runtime values include custom `ocons` structs (for cons-cell counting) and `closure` structs. A mutable `exec-ctx` struct tracks fuel, recursion depth, and cons allocations. Lexical environments are linked alists. All errors are CL conditions under a common `wardlisp-error` hierarchy.
 
 **Tech Stack:** Common Lisp (SBCL), ASDF (package-inferred-system), Rove (testing)
 
@@ -31,16 +31,16 @@ main.lisp        → evaluator (re-exports public API)
 ### Task 1: Project Structure & Core Types
 
 **Files:**
-- Modify: `omoikane-lisp.asd`
+- Modify: `wardlisp.asd`
 - Create: `src/types.lisp`
 - Modify: `src/main.lisp`
 - Create: `tests/types-test.lisp`
 - Modify: `tests/main.lisp`
 
-**Step 1: Update omoikane-lisp.asd for new module structure**
+**Step 1: Update wardlisp.asd for new module structure**
 
 ```lisp
-(defsystem "omoikane-lisp"
+(defsystem "wardlisp"
   :version "0.1.0"
   :author ""
   :license ""
@@ -56,12 +56,12 @@ main.lisp        → evaluator (re-exports public API)
                  (:file "evaluator")
                  (:file "main"))))
   :description "Restricted Lisp evaluator for educational games"
-  :in-order-to ((test-op (test-op "omoikane-lisp/tests"))))
+  :in-order-to ((test-op (test-op "wardlisp/tests"))))
 
-(defsystem "omoikane-lisp/tests"
+(defsystem "wardlisp/tests"
   :author ""
   :license ""
-  :depends-on ("omoikane-lisp"
+  :depends-on ("wardlisp"
                "rove")
   :serial t
   :components ((:module "tests"
@@ -73,14 +73,14 @@ main.lisp        → evaluator (re-exports public API)
                  (:file "evaluator-test")
                  (:file "safety-test")
                  (:file "integration-test"))))
-  :description "Test system for omoikane-lisp"
+  :description "Test system for wardlisp"
   :perform (test-op (op c) (symbol-call :rove :run c)))
 ```
 
 **Step 2: Create src/types.lisp with structs and conditions**
 
 ```lisp
-(defpackage :omoikane-lisp/src/types
+(defpackage :wardlisp/src/types
   (:use :cl)
   (:export
    ;; Cons cell
@@ -99,21 +99,21 @@ main.lisp        → evaluator (re-exports public API)
    #:exec-ctx-steps-used #:exec-ctx-max-depth-reached
    #:exec-ctx-max-integer
    ;; Conditions
-   #:omoikane-error #:omoikane-error-message
-   #:omoikane-parse-error
-   #:omoikane-name-error
-   #:omoikane-type-error
-   #:omoikane-arity-error
-   #:omoikane-step-limit-exceeded
-   #:omoikane-recursion-limit-exceeded
-   #:omoikane-memory-limit-exceeded
-   #:omoikane-integer-limit-exceeded
-   #:omoikane-output-limit-exceeded
-   #:omoikane-timeout-exceeded
-   #:omoikane-internal-error
+   #:wardlisp-error #:wardlisp-error-message
+   #:wardlisp-parse-error
+   #:wardlisp-name-error
+   #:wardlisp-type-error
+   #:wardlisp-arity-error
+   #:wardlisp-step-limit-exceeded
+   #:wardlisp-recursion-limit-exceeded
+   #:wardlisp-memory-limit-exceeded
+   #:wardlisp-integer-limit-exceeded
+   #:wardlisp-output-limit-exceeded
+   #:wardlisp-timeout-exceeded
+   #:wardlisp-internal-error
    ;; Helpers
    #:consume-fuel #:track-depth #:track-cons #:check-integer))
-(in-package :omoikane-lisp/src/types)
+(in-package :wardlisp/src/types)
 
 ;;; --- Custom cons cell for allocation counting ---
 
@@ -160,22 +160,22 @@ main.lisp        → evaluator (re-exports public API)
 
 ;;; --- Error conditions ---
 
-(define-condition omoikane-error (error)
-  ((message :initarg :message :reader omoikane-error-message
+(define-condition wardlisp-error (error)
+  ((message :initarg :message :reader wardlisp-error-message
             :initform ""))
-  (:report (lambda (c s) (format s "~a" (omoikane-error-message c)))))
+  (:report (lambda (c s) (format s "~a" (wardlisp-error-message c)))))
 
-(define-condition omoikane-parse-error (omoikane-error) ())
-(define-condition omoikane-name-error (omoikane-error) ())
-(define-condition omoikane-type-error (omoikane-error) ())
-(define-condition omoikane-arity-error (omoikane-error) ())
-(define-condition omoikane-step-limit-exceeded (omoikane-error) ())
-(define-condition omoikane-recursion-limit-exceeded (omoikane-error) ())
-(define-condition omoikane-memory-limit-exceeded (omoikane-error) ())
-(define-condition omoikane-integer-limit-exceeded (omoikane-error) ())
-(define-condition omoikane-output-limit-exceeded (omoikane-error) ())
-(define-condition omoikane-timeout-exceeded (omoikane-error) ())
-(define-condition omoikane-internal-error (omoikane-error) ())
+(define-condition wardlisp-parse-error (wardlisp-error) ())
+(define-condition wardlisp-name-error (wardlisp-error) ())
+(define-condition wardlisp-type-error (wardlisp-error) ())
+(define-condition wardlisp-arity-error (wardlisp-error) ())
+(define-condition wardlisp-step-limit-exceeded (wardlisp-error) ())
+(define-condition wardlisp-recursion-limit-exceeded (wardlisp-error) ())
+(define-condition wardlisp-memory-limit-exceeded (wardlisp-error) ())
+(define-condition wardlisp-integer-limit-exceeded (wardlisp-error) ())
+(define-condition wardlisp-output-limit-exceeded (wardlisp-error) ())
+(define-condition wardlisp-timeout-exceeded (wardlisp-error) ())
+(define-condition wardlisp-internal-error (wardlisp-error) ())
 
 ;;; --- Resource control helpers ---
 
@@ -184,7 +184,7 @@ main.lisp        → evaluator (re-exports public API)
   (decf (exec-ctx-fuel ctx) amount)
   (incf (exec-ctx-steps-used ctx) amount)
   (when (<= (exec-ctx-fuel ctx) 0)
-    (error 'omoikane-step-limit-exceeded
+    (error 'wardlisp-step-limit-exceeded
            :message (format nil "Step limit exceeded after ~d steps"
                             (exec-ctx-steps-used ctx)))))
 
@@ -194,7 +194,7 @@ main.lisp        → evaluator (re-exports public API)
   (when (> (exec-ctx-current-depth ctx) (exec-ctx-max-depth-reached ctx))
     (setf (exec-ctx-max-depth-reached ctx) (exec-ctx-current-depth ctx)))
   (when (> (exec-ctx-current-depth ctx) (exec-ctx-max-depth ctx))
-    (error 'omoikane-recursion-limit-exceeded
+    (error 'wardlisp-recursion-limit-exceeded
            :message (format nil "Recursion depth ~d exceeds limit ~d"
                             (exec-ctx-current-depth ctx)
                             (exec-ctx-max-depth ctx)))))
@@ -203,7 +203,7 @@ main.lisp        → evaluator (re-exports public API)
   "Track cons cell allocation. Signals memory-limit-exceeded when over."
   (incf (exec-ctx-cons-count ctx) count)
   (when (> (exec-ctx-cons-count ctx) (exec-ctx-max-cons ctx))
-    (error 'omoikane-memory-limit-exceeded
+    (error 'wardlisp-memory-limit-exceeded
            :message (format nil "Cons allocation ~d exceeds limit ~d"
                             (exec-ctx-cons-count ctx)
                             (exec-ctx-max-cons ctx)))))
@@ -211,7 +211,7 @@ main.lisp        → evaluator (re-exports public API)
 (defun check-integer (ctx value)
   "Check integer is within allowed range. Signals integer-limit-exceeded if not."
   (when (> (abs value) (exec-ctx-max-integer ctx))
-    (error 'omoikane-integer-limit-exceeded
+    (error 'wardlisp-integer-limit-exceeded
            :message (format nil "Integer ~d exceeds limit ~d"
                             value (exec-ctx-max-integer ctx))))
   value)
@@ -224,21 +224,21 @@ Create minimal stub files for `reader.lisp`, `env.lisp`, `builtins.lisp`, `evalu
 **Step 4: Update src/main.lisp as the public API package**
 
 ```lisp
-(defpackage :omoikane-lisp
+(defpackage :wardlisp
   (:use :cl)
   (:export
    ;; Public API (filled in Task 9)
    #:evaluate))
-(in-package :omoikane-lisp)
+(in-package :wardlisp)
 ```
 
 **Step 5: Write tests for types**
 
 Create `tests/types-test.lisp`:
 ```lisp
-(defpackage :omoikane-lisp/tests/types-test
-  (:use :cl :rove :omoikane-lisp/src/types))
-(in-package :omoikane-lisp/tests/types-test)
+(defpackage :wardlisp/tests/types-test
+  (:use :cl :rove :wardlisp/src/types))
+(in-package :wardlisp/tests/types-test)
 
 (deftest test-ocons-creation
   (let ((cell (make-ocons 1 2)))
@@ -262,26 +262,26 @@ Create `tests/types-test.lisp`:
     (consume-fuel ctx)
     (ok (= 2 (exec-ctx-fuel ctx)))
     (consume-fuel ctx 2)
-    (ok (signals (consume-fuel ctx) 'omoikane-step-limit-exceeded))))
+    (ok (signals (consume-fuel ctx) 'wardlisp-step-limit-exceeded))))
 
 (deftest test-track-depth
   (let ((ctx (make-exec-ctx :max-depth 2)))
     (track-depth ctx 1)
     (ok (= 1 (exec-ctx-current-depth ctx)))
     (track-depth ctx 1)
-    (ok (signals (track-depth ctx 1) 'omoikane-recursion-limit-exceeded))))
+    (ok (signals (track-depth ctx 1) 'wardlisp-recursion-limit-exceeded))))
 
 (deftest test-track-cons
   (let ((ctx (make-exec-ctx :max-cons 2)))
     (track-cons ctx)
     (ok (= 1 (exec-ctx-cons-count ctx)))
     (track-cons ctx)
-    (ok (signals (track-cons ctx) 'omoikane-memory-limit-exceeded))))
+    (ok (signals (track-cons ctx) 'wardlisp-memory-limit-exceeded))))
 
 (deftest test-check-integer
   (let ((ctx (make-exec-ctx :max-integer 100)))
     (ok (= 50 (check-integer ctx 50)))
-    (ok (signals (check-integer ctx 200) 'omoikane-integer-limit-exceeded))))
+    (ok (signals (check-integer ctx 200) 'wardlisp-integer-limit-exceeded))))
 ```
 
 **Step 6: Delete old tests/main.lisp placeholder**
@@ -291,8 +291,8 @@ Remove `tests/main.lisp` (replaced by specific test files).
 **Step 7: Load system and run tests**
 
 ```
-load-system: omoikane-lisp
-run-tests: omoikane-lisp/tests
+load-system: wardlisp
+run-tests: wardlisp/tests
 ```
 Expected: All types-test tests pass.
 
@@ -321,70 +321,70 @@ The reader converts a string into an AST. It does NOT use CL's `read`. The AST u
 **Step 1: Write reader tests**
 
 ```lisp
-(defpackage :omoikane-lisp/tests/reader-test
-  (:use :cl :rove :omoikane-lisp/src/reader))
-(in-package :omoikane-lisp/tests/reader-test)
+(defpackage :wardlisp/tests/reader-test
+  (:use :cl :rove :wardlisp/src/reader))
+(in-package :wardlisp/tests/reader-test)
 
 ;; --- Atoms ---
 (deftest test-read-integer
-  (ok (= 42 (omoikane-read "42")))
-  (ok (= -7 (omoikane-read "-7")))
-  (ok (= 0 (omoikane-read "0"))))
+  (ok (= 42 (wardlisp-read "42")))
+  (ok (= -7 (wardlisp-read "-7")))
+  (ok (= 0 (wardlisp-read "0"))))
 
 (deftest test-read-boolean
-  (ok (eq t (omoikane-read "t")))
-  (ok (eq nil (omoikane-read "nil"))))
+  (ok (eq t (wardlisp-read "t")))
+  (ok (eq nil (wardlisp-read "nil"))))
 
 (deftest test-read-symbol
-  (ok (equal "+" (omoikane-read "+")))
-  (ok (equal "factorial" (omoikane-read "factorial")))
-  (ok (equal "null?" (omoikane-read "null?"))))
+  (ok (equal "+" (wardlisp-read "+")))
+  (ok (equal "factorial" (wardlisp-read "factorial")))
+  (ok (equal "null?" (wardlisp-read "null?"))))
 
 ;; --- Lists ---
 (deftest test-read-list
-  (ok (equal '("+" 1 2) (omoikane-read "(+ 1 2)")))
-  (ok (equal nil (omoikane-read "()")))
-  (ok (equal '("list" 1 2 3) (omoikane-read "(list 1 2 3)"))))
+  (ok (equal '("+" 1 2) (wardlisp-read "(+ 1 2)")))
+  (ok (equal nil (wardlisp-read "()")))
+  (ok (equal '("list" 1 2 3) (wardlisp-read "(list 1 2 3)"))))
 
 (deftest test-read-nested-list
-  (ok (equal '("+" ("*" 2 3) 4) (omoikane-read "(+ (* 2 3) 4)"))))
+  (ok (equal '("+" ("*" 2 3) 4) (wardlisp-read "(+ (* 2 3) 4)"))))
 
 ;; --- Quote ---
 (deftest test-read-quote
-  (ok (equal '("quote" "x") (omoikane-read "'x")))
-  (ok (equal '("quote" (1 2 3)) (omoikane-read "'(1 2 3)"))))
+  (ok (equal '("quote" "x") (wardlisp-read "'x")))
+  (ok (equal '("quote" (1 2 3)) (wardlisp-read "'(1 2 3)"))))
 
 ;; --- Whitespace & comments ---
 (deftest test-read-whitespace
-  (ok (= 42 (omoikane-read "  42  ")))
-  (ok (equal '("+" 1 2) (omoikane-read " ( +  1  2 ) "))))
+  (ok (= 42 (wardlisp-read "  42  ")))
+  (ok (equal '("+" 1 2) (wardlisp-read " ( +  1  2 ) "))))
 
 (deftest test-read-comment
-  (ok (= 42 (omoikane-read "; this is a comment\n42"))))
+  (ok (= 42 (wardlisp-read "; this is a comment\n42"))))
 
 ;; --- Multiple expressions ---
 (deftest test-read-program
   (ok (equal '(("define" ("f" "x") ("+" "x" 1)) ("f" 10))
-             (omoikane-read-program "(define (f x) (+ x 1))\n(f 10)"))))
+             (wardlisp-read-program "(define (f x) (+ x 1))\n(f 10)"))))
 
 ;; --- Errors ---
 (deftest test-read-unmatched-paren
-  (ok (signals (omoikane-read "(+ 1 2") 'omoikane-lisp/src/types:omoikane-parse-error))
-  (ok (signals (omoikane-read ")") 'omoikane-lisp/src/types:omoikane-parse-error)))
+  (ok (signals (wardlisp-read "(+ 1 2") 'wardlisp/src/types:wardlisp-parse-error))
+  (ok (signals (wardlisp-read ")") 'wardlisp/src/types:wardlisp-parse-error)))
 
 (deftest test-read-reject-package-prefix
-  (ok (signals (omoikane-read "cl:car") 'omoikane-lisp/src/types:omoikane-parse-error)))
+  (ok (signals (wardlisp-read "cl:car") 'wardlisp/src/types:wardlisp-parse-error)))
 
 (deftest test-read-reject-reader-macro
-  (ok (signals (omoikane-read "#.42") 'omoikane-lisp/src/types:omoikane-parse-error))
-  (ok (signals (omoikane-read "#'car") 'omoikane-lisp/src/types:omoikane-parse-error)))
+  (ok (signals (wardlisp-read "#.42") 'wardlisp/src/types:wardlisp-parse-error))
+  (ok (signals (wardlisp-read "#'car") 'wardlisp/src/types:wardlisp-parse-error)))
 ```
 
 **Step 2: Run tests to verify they fail**
 
 ```
-load-system: omoikane-lisp
-run-tests: omoikane-lisp/tests
+load-system: wardlisp
+run-tests: wardlisp/tests
 ```
 Expected: FAIL (functions not defined)
 
@@ -393,19 +393,19 @@ Expected: FAIL (functions not defined)
 `src/reader.lisp` — a hand-written recursive descent reader:
 
 ```lisp
-(defpackage :omoikane-lisp/src/reader
-  (:use :cl :omoikane-lisp/src/types)
-  (:export #:omoikane-read #:omoikane-read-program))
-(in-package :omoikane-lisp/src/reader)
+(defpackage :wardlisp/src/reader
+  (:use :cl :wardlisp/src/types)
+  (:export #:wardlisp-read #:wardlisp-read-program))
+(in-package :wardlisp/src/reader)
 
-(defun omoikane-read (input)
+(defun wardlisp-read (input)
   "Read a single expression from INPUT string."
   (multiple-value-bind (expr pos) (read-expr input 0)
     (let ((pos (skip-whitespace-and-comments input pos)))
       (declare (ignore pos))
       expr)))
 
-(defun omoikane-read-program (input)
+(defun wardlisp-read-program (input)
   "Read all top-level expressions from INPUT string. Returns a list."
   (let ((exprs '())
         (pos 0)
@@ -423,14 +423,14 @@ Expected: FAIL (functions not defined)
   "Parse one expression from INPUT starting at POS. Returns (values expr new-pos)."
   (setf pos (skip-whitespace-and-comments input pos))
   (when (>= pos (length input))
-    (error 'omoikane-parse-error :message "Unexpected end of input"))
+    (error 'wardlisp-parse-error :message "Unexpected end of input"))
   (let ((ch (char input pos)))
     (cond
       ((char= ch #\() (read-list input (1+ pos)))
-      ((char= ch #\)) (error 'omoikane-parse-error
+      ((char= ch #\)) (error 'wardlisp-parse-error
                               :message "Unexpected closing parenthesis"))
       ((char= ch #\') (read-quote input (1+ pos)))
-      ((char= ch #\#) (error 'omoikane-parse-error
+      ((char= ch #\#) (error 'wardlisp-parse-error
                               :message "Reader macros (#) are not allowed"))
       (t (read-atom input pos)))))
 
@@ -440,7 +440,7 @@ Expected: FAIL (functions not defined)
     (loop
       (setf pos (skip-whitespace-and-comments input pos))
       (when (>= pos (length input))
-        (error 'omoikane-parse-error :message "Unterminated list — missing ')'"))
+        (error 'wardlisp-parse-error :message "Unterminated list — missing ')'"))
       (when (char= (char input pos) #\))
         (return (values (nreverse elements) (1+ pos))))
       (multiple-value-bind (expr new-pos) (read-expr input pos)
@@ -459,12 +459,12 @@ Expected: FAIL (functions not defined)
     (loop while (and (< pos len) (atom-char-p (char input pos)))
           do (incf pos))
     (when (= start pos)
-      (error 'omoikane-parse-error
+      (error 'wardlisp-parse-error
              :message (format nil "Unexpected character: ~a" (char input pos))))
     (let ((token (subseq input start pos)))
       ;; Reject package prefixes
       (when (find #\: token)
-        (error 'omoikane-parse-error
+        (error 'wardlisp-parse-error
                :message (format nil "Package prefix not allowed: ~a" token)))
       (values (parse-token token) pos))))
 
@@ -517,8 +517,8 @@ Expected: FAIL (functions not defined)
 **Step 4: Run tests to verify they pass**
 
 ```
-load-system: omoikane-lisp (force reload)
-run-tests: omoikane-lisp/tests
+load-system: wardlisp (force reload)
+run-tests: wardlisp/tests
 ```
 Expected: All reader-test tests PASS.
 
@@ -540,16 +540,16 @@ git commit -m "feat: add safe S-expression reader with quote, comments, error ha
 **Step 1: Write environment tests**
 
 ```lisp
-(defpackage :omoikane-lisp/tests/env-test
-  (:use :cl :rove :omoikane-lisp/src/env :omoikane-lisp/src/types))
-(in-package :omoikane-lisp/tests/env-test)
+(defpackage :wardlisp/tests/env-test
+  (:use :cl :rove :wardlisp/src/env :wardlisp/src/types))
+(in-package :wardlisp/tests/env-test)
 
 (deftest test-env-lookup
   (let ((env (env-extend nil '("x") '(42))))
     (ok (= 42 (env-lookup env "x")))))
 
 (deftest test-env-lookup-missing
-  (ok (signals (env-lookup nil "x") 'omoikane-name-error)))
+  (ok (signals (env-lookup nil "x") 'wardlisp-name-error)))
 
 (deftest test-env-nested
   (let* ((outer (env-extend nil '("x") '(1)))
@@ -571,10 +571,10 @@ git commit -m "feat: add safe S-expression reader with quote, comments, error ha
 **Step 2: Implement environment**
 
 ```lisp
-(defpackage :omoikane-lisp/src/env
-  (:use :cl :omoikane-lisp/src/types)
+(defpackage :wardlisp/src/env
+  (:use :cl :wardlisp/src/types)
   (:export #:env-extend #:env-lookup #:env-set!))
-(in-package :omoikane-lisp/src/env)
+(in-package :wardlisp/src/env)
 
 (defun env-extend (parent names values)
   "Create a new environment frame extending PARENT with NAMES bound to VALUES."
@@ -582,11 +582,11 @@ git commit -m "feat: add safe S-expression reader with quote, comments, error ha
     (cons frame parent)))
 
 (defun env-lookup (env name)
-  "Look up NAME in ENV. Signals omoikane-name-error if not found."
+  "Look up NAME in ENV. Signals wardlisp-name-error if not found."
   (loop for frame in env
         do (let ((pair (assoc name frame :test #'string=)))
              (when pair (return-from env-lookup (cdr pair)))))
-  (error 'omoikane-name-error
+  (error 'wardlisp-name-error
          :message (format nil "Undefined variable: ~a" name)))
 
 (defun env-set! (env name value)
@@ -596,7 +596,7 @@ git commit -m "feat: add safe S-expression reader with quote, comments, error ha
              (when pair
                (setf (cdr pair) value)
                (return-from env-set! value))))
-  (error 'omoikane-name-error
+  (error 'wardlisp-name-error
          :message (format nil "Cannot set undefined variable: ~a" name)))
 ```
 
@@ -624,11 +624,11 @@ The evaluator is the heart of the system. It takes an AST expression, an environ
 **Step 1: Write evaluator tests for literals and special forms**
 
 ```lisp
-(defpackage :omoikane-lisp/tests/evaluator-test
+(defpackage :wardlisp/tests/evaluator-test
   (:use :cl :rove
-        :omoikane-lisp/src/types
-        :omoikane-lisp/src/evaluator))
-(in-package :omoikane-lisp/tests/evaluator-test)
+        :wardlisp/src/types
+        :wardlisp/src/evaluator))
+(in-package :wardlisp/tests/evaluator-test)
 
 (defun eval1 (code &key (fuel 1000))
   "Helper: parse and evaluate a single expression."
@@ -691,35 +691,35 @@ The evaluator is the heart of the system. It takes an AST expression, an environ
 ;; --- Step counting ---
 (deftest test-eval-step-counting
   (ok (signals (eval1 "(define (f x) (f x)) (f 1)" :fuel 100)
-               'omoikane-step-limit-exceeded)))
+               'wardlisp-step-limit-exceeded)))
 ```
 
 **Step 2: Implement evaluator**
 
 ```lisp
-(defpackage :omoikane-lisp/src/evaluator
+(defpackage :wardlisp/src/evaluator
   (:use :cl
-        :omoikane-lisp/src/types
-        :omoikane-lisp/src/reader
-        :omoikane-lisp/src/env
-        :omoikane-lisp/src/builtins)
-  (:export #:omoikane-eval #:eval-string))
-(in-package :omoikane-lisp/src/evaluator)
+        :wardlisp/src/types
+        :wardlisp/src/reader
+        :wardlisp/src/env
+        :wardlisp/src/builtins)
+  (:export #:wardlisp-eval #:eval-string))
+(in-package :wardlisp/src/evaluator)
 
 (defun eval-string (input &key (fuel 10000) (max-depth 100)
                                (max-cons 10000) (max-output 1000)
                                (max-integer (expt 2 64)))
   "Parse and evaluate INPUT string. Returns the result of the last expression."
-  (let ((program (omoikane-read-program input))
+  (let ((program (wardlisp-read-program input))
         (ctx (make-exec-ctx :fuel fuel :max-depth max-depth
                             :max-cons max-cons :max-output max-output
                             :max-integer max-integer))
         (env (make-initial-env)))
     (let ((result nil))
       (dolist (expr program result)
-        (setf result (omoikane-eval expr env ctx))))))
+        (setf result (wardlisp-eval expr env ctx))))))
 
-(defun omoikane-eval (expr env ctx)
+(defun wardlisp-eval (expr env ctx)
   "Evaluate EXPR in ENV with execution context CTX."
   (consume-fuel ctx)
   (cond
@@ -731,7 +731,7 @@ The evaluator is the heart of the system. It takes an AST expression, an environ
     ((stringp expr) (env-lookup env expr))
     ;; Compound forms
     ((consp expr) (eval-compound expr env ctx))
-    (t (error 'omoikane-internal-error
+    (t (error 'wardlisp-internal-error
               :message (format nil "Unknown expression type: ~s" expr)))))
 
 (defun eval-compound (expr env ctx)
@@ -754,7 +754,7 @@ The evaluator is the heart of the system. It takes an AST expression, an environ
 
 (defun eval-quote (args ctx)
   (when (/= (length args) 1)
-    (error 'omoikane-arity-error :message "quote requires exactly 1 argument"))
+    (error 'wardlisp-arity-error :message "quote requires exactly 1 argument"))
   (ast-to-value (car args) ctx))
 
 (defun ast-to-value (ast ctx)
@@ -773,44 +773,44 @@ The evaluator is the heart of the system. It takes an AST expression, an environ
 (defun eval-if (args env ctx)
   (let ((len (length args)))
     (when (or (< len 2) (> len 3))
-      (error 'omoikane-arity-error :message "if requires 2 or 3 arguments"))
-    (if (omoikane-eval (first args) env ctx)
-        (omoikane-eval (second args) env ctx)
+      (error 'wardlisp-arity-error :message "if requires 2 or 3 arguments"))
+    (if (wardlisp-eval (first args) env ctx)
+        (wardlisp-eval (second args) env ctx)
         (if (= len 3)
-            (omoikane-eval (third args) env ctx)
+            (wardlisp-eval (third args) env ctx)
             nil))))
 
 (defun eval-let (args env ctx)
   (when (< (length args) 2)
-    (error 'omoikane-arity-error :message "let requires bindings and body"))
+    (error 'wardlisp-arity-error :message "let requires bindings and body"))
   (let* ((bindings (first args))
          (body (rest args))
          (names (mapcar #'first bindings))
-         (values (mapcar (lambda (b) (omoikane-eval (second b) env ctx))
+         (values (mapcar (lambda (b) (wardlisp-eval (second b) env ctx))
                          bindings))
          (new-env (env-extend env names values)))
     (let ((result nil))
       (dolist (expr body result)
-        (setf result (omoikane-eval expr new-env ctx))))))
+        (setf result (wardlisp-eval expr new-env ctx))))))
 
 (defun eval-let* (args env ctx)
   (when (< (length args) 2)
-    (error 'omoikane-arity-error :message "let* requires bindings and body"))
+    (error 'wardlisp-arity-error :message "let* requires bindings and body"))
   (let ((bindings (first args))
         (body (rest args))
         (current-env env))
     (dolist (binding bindings)
-      (let ((val (omoikane-eval (second binding) current-env ctx)))
+      (let ((val (wardlisp-eval (second binding) current-env ctx)))
         (setf current-env (env-extend current-env
                                       (list (first binding))
                                       (list val)))))
     (let ((result nil))
       (dolist (expr body result)
-        (setf result (omoikane-eval expr current-env ctx))))))
+        (setf result (wardlisp-eval expr current-env ctx))))))
 
 (defun eval-lambda (args env)
   (when (< (length args) 2)
-    (error 'omoikane-arity-error :message "lambda requires params and body"))
+    (error 'wardlisp-arity-error :message "lambda requires params and body"))
   (let ((params (first args))
         (body (if (= 1 (length (rest args)))
                   (second args)
@@ -838,19 +838,19 @@ The evaluator is the heart of the system. It takes an AST expression, an environ
            closure)))
       ;; (define name value)
       ((stringp target)
-       (let ((value (omoikane-eval (second args) env ctx)))
+       (let ((value (wardlisp-eval (second args) env ctx)))
          (let ((frame (list (cons target value))))
            (nconc env (list frame)))
          value))
-      (t (error 'omoikane-parse-error
+      (t (error 'wardlisp-parse-error
                 :message (format nil "Invalid define target: ~s" target))))))
 
 (defun eval-cond (clauses env ctx)
   (dolist (clause clauses nil)
-    (let ((test-result (omoikane-eval (first clause) env ctx)))
+    (let ((test-result (wardlisp-eval (first clause) env ctx)))
       (when test-result
         (return (if (rest clause)
-                    (omoikane-eval (second clause) env ctx)
+                    (wardlisp-eval (second clause) env ctx)
                     test-result))))))
 
 (defun eval-and (args env ctx)
@@ -858,22 +858,22 @@ The evaluator is the heart of the system. It takes an AST expression, an environ
       t
       (let ((result nil))
         (dolist (arg args result)
-          (setf result (omoikane-eval arg env ctx))
+          (setf result (wardlisp-eval arg env ctx))
           (unless result (return nil))))))
 
 (defun eval-or (args env ctx)
   (if (null args)
       nil
       (dolist (arg args nil)
-        (let ((result (omoikane-eval arg env ctx)))
+        (let ((result (wardlisp-eval arg env ctx)))
           (when result (return result))))))
 
 ;;; --- Function application ---
 
 (defun eval-application (operator args env ctx)
   "Evaluate a function call."
-  (let ((func (omoikane-eval operator env ctx))
-        (evaluated-args (mapcar (lambda (a) (omoikane-eval a env ctx)) args)))
+  (let ((func (wardlisp-eval operator env ctx))
+        (evaluated-args (mapcar (lambda (a) (wardlisp-eval a env ctx)) args)))
     (apply-function func evaluated-args ctx)))
 
 (defun apply-function (func args ctx)
@@ -883,24 +883,24 @@ The evaluator is the heart of the system. It takes an AST expression, an environ
     ((closure-p func)
      (let ((params (closure-params func)))
        (when (/= (length params) (length args))
-         (error 'omoikane-arity-error
+         (error 'wardlisp-arity-error
                 :message (format nil "~a expects ~d args, got ~d"
                                  (or (closure-name func) "lambda")
                                  (length params) (length args))))
        (track-depth ctx 1)
        (unwind-protect
             (let ((call-env (env-extend (closure-env func) params args)))
-              (omoikane-eval (closure-body func) call-env ctx))
+              (wardlisp-eval (closure-body func) call-env ctx))
          (track-depth ctx -1))))
     ((builtin-p func)
      (when (and (builtin-arity func)
                 (/= (builtin-arity func) (length args)))
-       (error 'omoikane-arity-error
+       (error 'wardlisp-arity-error
               :message (format nil "~a expects ~d args, got ~d"
                                (builtin-name func)
                                (builtin-arity func) (length args))))
      (funcall (builtin-func func) args ctx))
-    (t (error 'omoikane-type-error
+    (t (error 'wardlisp-type-error
               :message (format nil "Not a function: ~s" func)))))
 ```
 
@@ -998,10 +998,10 @@ git commit -m "feat: add core evaluator with special forms and function applicat
 **Step 2: Implement builtins**
 
 ```lisp
-(defpackage :omoikane-lisp/src/builtins
-  (:use :cl :omoikane-lisp/src/types :omoikane-lisp/src/env)
+(defpackage :wardlisp/src/builtins
+  (:use :cl :wardlisp/src/types :wardlisp/src/env)
   (:export #:make-initial-env))
-(in-package :omoikane-lisp/src/builtins)
+(in-package :wardlisp/src/builtins)
 
 (defun make-initial-env ()
   "Create the initial environment with all built-in functions."
@@ -1037,12 +1037,12 @@ git commit -m "feat: add core evaluator with special forms and function applicat
 
 (defun ensure-integer (name value)
   (unless (integerp value)
-    (error 'omoikane-type-error
+    (error 'wardlisp-type-error
            :message (format nil "~a: expected integer, got ~s" name value))))
 
 (defun ensure-ocons (name value)
   (unless (ocons-p value)
-    (error 'omoikane-type-error
+    (error 'wardlisp-type-error
            :message (format nil "~a: expected list/pair, got ~s" name value))))
 
 ;;; --- Arithmetic ---
@@ -1054,7 +1054,7 @@ git commit -m "feat: add core evaluator with special forms and function applicat
 
 (defun builtin-sub (args ctx)
   (when (null args)
-    (error 'omoikane-arity-error :message "- requires at least 1 argument"))
+    (error 'wardlisp-arity-error :message "- requires at least 1 argument"))
   (dolist (a args) (ensure-integer "-" a))
   (let ((result (if (= 1 (length args))
                     (- (first args))
@@ -1069,14 +1069,14 @@ git commit -m "feat: add core evaluator with special forms and function applicat
 (defun builtin-div (args ctx)
   (dolist (a args) (ensure-integer "div" a))
   (when (zerop (second args))
-    (error 'omoikane-type-error :message "div: division by zero"))
+    (error 'wardlisp-type-error :message "div: division by zero"))
   (check-integer ctx (truncate (first args) (second args))))
 
 (defun builtin-mod (args ctx)
   (declare (ignore ctx))
   (dolist (a args) (ensure-integer "mod" a))
   (when (zerop (second args))
-    (error 'omoikane-type-error :message "mod: division by zero"))
+    (error 'wardlisp-type-error :message "mod: division by zero"))
   (cl:mod (first args) (second args)))
 
 ;;; --- Comparison ---
@@ -1169,7 +1169,7 @@ git commit -m "feat: add core evaluator with special forms and function applicat
         (output (exec-ctx-output ctx)))
     (let ((str (print-value value)))
       (when (> (+ (length output) (length str)) (exec-ctx-max-output ctx))
-        (error 'omoikane-output-limit-exceeded
+        (error 'wardlisp-output-limit-exceeded
                :message "Output limit exceeded"))
       (loop for ch across str do (vector-push-extend ch output))
       (vector-push-extend #\Newline output))
@@ -1226,11 +1226,11 @@ Safety is already wired into the evaluator via `exec-ctx`. This task adds compre
 **Step 1: Write safety tests**
 
 ```lisp
-(defpackage :omoikane-lisp/tests/safety-test
+(defpackage :wardlisp/tests/safety-test
   (:use :cl :rove
-        :omoikane-lisp/src/types
-        :omoikane-lisp/src/evaluator))
-(in-package :omoikane-lisp/tests/safety-test)
+        :wardlisp/src/types
+        :wardlisp/src/evaluator))
+(in-package :wardlisp/tests/safety-test)
 
 (defun eval-safe (code &key (fuel 100) (max-depth 10) (max-cons 50)
                             (max-output 100) (max-integer 1000000))
@@ -1241,65 +1241,65 @@ Safety is already wired into the evaluator via `exec-ctx`. This task adds compre
 (deftest test-infinite-recursion-stops
   (ok (signals
        (eval-safe "(define (f x) (f x)) (f 1)")
-       'omoikane-step-limit-exceeded)))
+       'wardlisp-step-limit-exceeded)))
 
 (deftest test-deep-computation-stops
   (ok (signals
        (eval-safe "(define (f n) (if (= n 0) 0 (+ 1 (f (- n 1))))) (f 10000)"
                   :fuel 50)
-       'omoikane-step-limit-exceeded)))
+       'wardlisp-step-limit-exceeded)))
 
 ;; --- Recursion depth ---
 (deftest test-deep-recursion-stops
   (ok (signals
        (eval-safe "(define (f n) (if (= n 0) 0 (+ 1 (f (- n 1))))) (f 100)"
                   :fuel 100000 :max-depth 5)
-       'omoikane-recursion-limit-exceeded)))
+       'wardlisp-recursion-limit-exceeded)))
 
 ;; --- Memory / cons limit ---
 (deftest test-huge-list-stops
   (ok (signals
        (eval-safe "(define (make n) (if (= n 0) nil (cons n (make (- n 1))))) (make 1000)"
                   :fuel 100000 :max-cons 10)
-       'omoikane-memory-limit-exceeded)))
+       'wardlisp-memory-limit-exceeded)))
 
 ;; --- Integer size limit ---
 (deftest test-huge-integer-stops
   (ok (signals
        (eval-safe "(* 999999 999999)" :max-integer 1000000)
-       'omoikane-integer-limit-exceeded)))
+       'wardlisp-integer-limit-exceeded)))
 
 ;; --- Output limit ---
 (deftest test-output-limit
   (ok (signals
        (eval-safe "(define (spam n) (if (= n 0) nil (let () (print n) (spam (- n 1))))) (spam 100)"
                   :fuel 100000 :max-output 20)
-       'omoikane-output-limit-exceeded)))
+       'wardlisp-output-limit-exceeded)))
 
 ;; --- Name error ---
 (deftest test-undefined-variable
-  (ok (signals (eval-safe "undefined-var") 'omoikane-name-error)))
+  (ok (signals (eval-safe "undefined-var") 'wardlisp-name-error)))
 
 ;; --- Type error ---
 (deftest test-type-error-arithmetic
-  (ok (signals (eval-safe "(+ 1 t)") 'omoikane-type-error)))
+  (ok (signals (eval-safe "(+ 1 t)") 'wardlisp-type-error)))
 
 (deftest test-type-error-car
-  (ok (signals (eval-safe "(car 42)") 'omoikane-type-error)))
+  (ok (signals (eval-safe "(car 42)") 'wardlisp-type-error)))
 
 ;; --- Arity error ---
 (deftest test-arity-error
-  (ok (signals (eval-safe "((lambda (x) x) 1 2)") 'omoikane-arity-error)))
+  (ok (signals (eval-safe "((lambda (x) x) 1 2)") 'wardlisp-arity-error)))
 
 ;; --- No host eval ---
 (deftest test-no-eval-access
-  (ok (signals (eval-safe "(eval '(+ 1 2))") 'omoikane-name-error)))
+  (ok (signals (eval-safe "(eval '(+ 1 2))") 'wardlisp-name-error)))
 
 ;; --- No setf/setq ---
 (deftest test-no-mutation
   ;; setf and setq are not special forms, so they'd be looked up as functions
-  (ok (signals (eval-safe "(setf x 1)") 'omoikane-name-error))
-  (ok (signals (eval-safe "(setq x 1)") 'omoikane-name-error)))
+  (ok (signals (eval-safe "(setf x 1)") 'wardlisp-name-error))
+  (ok (signals (eval-safe "(setq x 1)") 'wardlisp-name-error)))
 ```
 
 **Step 2: Run safety tests**
@@ -1326,23 +1326,23 @@ git commit -m "test: add comprehensive safety tests for all resource limits"
 The public API wraps `eval-string` and returns structured results:
 
 ```lisp
-(defpackage :omoikane-lisp
+(defpackage :wardlisp
   (:use :cl
-        :omoikane-lisp/src/types
-        :omoikane-lisp/src/evaluator
-        :omoikane-lisp/src/builtins)
+        :wardlisp/src/types
+        :wardlisp/src/evaluator
+        :wardlisp/src/builtins)
   (:export #:evaluate #:print-value
            ;; Re-export conditions for handler-case
-           #:omoikane-error #:omoikane-error-message
-           #:omoikane-parse-error #:omoikane-name-error
-           #:omoikane-type-error #:omoikane-arity-error
-           #:omoikane-step-limit-exceeded
-           #:omoikane-recursion-limit-exceeded
-           #:omoikane-memory-limit-exceeded
-           #:omoikane-integer-limit-exceeded
-           #:omoikane-output-limit-exceeded
-           #:omoikane-timeout-exceeded))
-(in-package :omoikane-lisp)
+           #:wardlisp-error #:wardlisp-error-message
+           #:wardlisp-parse-error #:wardlisp-name-error
+           #:wardlisp-type-error #:wardlisp-arity-error
+           #:wardlisp-step-limit-exceeded
+           #:wardlisp-recursion-limit-exceeded
+           #:wardlisp-memory-limit-exceeded
+           #:wardlisp-integer-limit-exceeded
+           #:wardlisp-output-limit-exceeded
+           #:wardlisp-timeout-exceeded))
+(in-package :wardlisp)
 
 (defun evaluate (code &key (fuel 10000) (max-depth 100)
                            (max-cons 10000) (max-output 1000)
@@ -1356,17 +1356,17 @@ On error, returns (values nil metrics-plist) with :error-type and :error-message
                             :max-integer max-integer)))
     (handler-case
         (let* ((result (with-timeout timeout
-                         (let ((program (omoikane-lisp/src/reader:omoikane-read-program code))
+                         (let ((program (wardlisp/src/reader:wardlisp-read-program code))
                                (env (make-initial-env)))
                            (let ((r nil))
                              (dolist (expr program r)
-                               (setf r (omoikane-eval expr env ctx)))))))
+                               (setf r (wardlisp-eval expr env ctx)))))))
                (metrics (make-metrics ctx)))
           (values result metrics))
-      (omoikane-error (e)
+      (wardlisp-error (e)
         (values nil (make-metrics ctx
                                   :error-type (type-of e)
-                                  :error-message (omoikane-error-message e)))))))
+                                  :error-message (wardlisp-error-message e)))))))
 
 (defun make-metrics (ctx &key error-type error-message)
   (list :steps-used (exec-ctx-steps-used ctx)
@@ -1390,9 +1390,9 @@ Note: `with-timeout` is a placeholder. For production, use `sb-ext:with-timeout`
 **Step 2: Write integration tests (acceptance criteria from PRD Section 19)**
 
 ```lisp
-(defpackage :omoikane-lisp/tests/integration-test
-  (:use :cl :rove :omoikane-lisp :omoikane-lisp/src/types))
-(in-package :omoikane-lisp/tests/integration-test)
+(defpackage :wardlisp/tests/integration-test
+  (:use :cl :rove :wardlisp :wardlisp/src/types))
+(in-package :wardlisp/tests/integration-test)
 
 ;;; PRD Acceptance Criterion 1:
 ;;; "ユーザ定義関数と再帰を含む小問題を解ける"
@@ -1438,7 +1438,7 @@ Note: `with-timeout` is a placeholder. For production, use `sb-ext:with-timeout`
   (multiple-value-bind (result metrics)
       (evaluate "(define (loop) (loop)) (loop)" :fuel 100)
     (ok (null result))
-    (ok (eq 'omoikane-step-limit-exceeded (getf metrics :error-type)))))
+    (ok (eq 'wardlisp-step-limit-exceeded (getf metrics :error-type)))))
 
 ;;; PRD Acceptance Criterion 3:
 ;;; "巨大リスト生成がメモリ制限で停止する"
@@ -1450,7 +1450,7 @@ Note: `with-timeout` is a placeholder. For production, use `sb-ext:with-timeout`
         (huge 10000)"
         :max-cons 100)
     (ok (null result))
-    (ok (eq 'omoikane-memory-limit-exceeded (getf metrics :error-type)))))
+    (ok (eq 'wardlisp-memory-limit-exceeded (getf metrics :error-type)))))
 
 ;;; PRD Acceptance Criterion 4:
 ;;; "ホスト Lisp の eval を使っていない"
@@ -1462,13 +1462,13 @@ Note: `with-timeout` is a placeholder. For production, use `sb-ext:with-timeout`
   (multiple-value-bind (result metrics)
       (evaluate "(open \"foo.txt\")")
     (ok (null result))
-    (ok (eq 'omoikane-name-error (getf metrics :error-type)))))
+    (ok (eq 'wardlisp-name-error (getf metrics :error-type)))))
 
 (deftest test-no-system-access
   (multiple-value-bind (result metrics)
       (evaluate "(run-program \"ls\")")
     (ok (null result))
-    (ok (eq 'omoikane-name-error (getf metrics :error-type)))))
+    (ok (eq 'wardlisp-name-error (getf metrics :error-type)))))
 
 ;;; PRD Acceptance Criterion 6:
 ;;; "実行ごとに step 数などのメタ情報が取得できる"
@@ -1501,8 +1501,8 @@ Note: `with-timeout` is a placeholder. For production, use `sb-ext:with-timeout`
 **Step 3: Run all tests**
 
 ```
-load-system: omoikane-lisp (force)
-run-tests: omoikane-lisp/tests
+load-system: wardlisp (force)
+run-tests: wardlisp/tests
 ```
 Expected: ALL tests PASS.
 
@@ -1515,7 +1515,7 @@ mallet src/*.lisp
 **Step 5: Final compile check**
 
 ```lisp
-(asdf:compile-system :omoikane-lisp :force t)
+(asdf:compile-system :wardlisp :force t)
 ```
 
 **Step 6: Commit**
@@ -1555,5 +1555,5 @@ tests/env-test.lisp     Environment tests
 tests/evaluator-test.lisp  Evaluator + builtin tests
 tests/safety-test.lisp  Safety limit tests
 tests/integration-test.lisp  End-to-end acceptance tests
-omoikane-lisp.asd       Updated system definition
+wardlisp.asd       Updated system definition
 ```

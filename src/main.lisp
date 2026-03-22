@@ -1,19 +1,19 @@
-(defpackage :omoikane-lisp
+(defpackage :wardlisp
   (:use :cl
-        :omoikane-lisp/src/types
-        :omoikane-lisp/src/evaluator
-        :omoikane-lisp/src/builtins)
+        :wardlisp/src/types
+        :wardlisp/src/evaluator
+        :wardlisp/src/builtins)
   (:export #:evaluate #:print-value
-           #:omoikane-error #:omoikane-error-message
-           #:omoikane-parse-error #:omoikane-name-error
-           #:omoikane-type-error #:omoikane-arity-error
-           #:omoikane-step-limit-exceeded
-           #:omoikane-recursion-limit-exceeded
-           #:omoikane-memory-limit-exceeded
-           #:omoikane-integer-limit-exceeded
-           #:omoikane-output-limit-exceeded
-           #:omoikane-timeout-exceeded))
-(in-package :omoikane-lisp)
+           #:wardlisp-error #:wardlisp-error-message
+           #:wardlisp-parse-error #:wardlisp-name-error
+           #:wardlisp-type-error #:wardlisp-arity-error
+           #:wardlisp-step-limit-exceeded
+           #:wardlisp-recursion-limit-exceeded
+           #:wardlisp-memory-limit-exceeded
+           #:wardlisp-integer-limit-exceeded
+           #:wardlisp-output-limit-exceeded
+           #:wardlisp-timeout-exceeded))
+(in-package :wardlisp)
 
 (defun evaluate (code &key (fuel 10000) (max-depth 100)
                            (max-cons 10000) (max-output 1000)
@@ -27,16 +27,16 @@ On error, returns (values nil metrics-plist) with :error-type in metrics."
                             :max-cons max-cons :max-output max-output
                             :max-integer max-integer)))
     (handler-case
-        (let* ((program (omoikane-lisp/src/reader:omoikane-read-program code))
+        (let* ((program (wardlisp/src/reader:wardlisp-read-program code))
                (env (make-initial-env))
                (result (let ((r nil))
                          (dolist (expr program r)
-                           (setf r (omoikane-eval expr env ctx))))))
+                           (setf r (wardlisp-eval expr env ctx))))))
           (values result (make-metrics ctx)))
-      (omoikane-error (e)
+      (wardlisp-error (e)
         (values nil (make-metrics ctx
                                   :error-type (type-of e)
-                                  :error-message (omoikane-error-message e)))))))
+                                  :error-message (wardlisp-error-message e)))))))
 
 (defun make-metrics (ctx &key error-type error-message)
   "Build metrics plist from execution context."

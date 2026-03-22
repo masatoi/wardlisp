@@ -1,4 +1,4 @@
-(defsystem "omoikane-lisp"
+(defsystem "wardlisp"
   :version "0.1.0"
   :author ""
   :license ""
@@ -14,12 +14,12 @@
                  (:file "evaluator")
                  (:file "main"))))
   :description "Restricted Lisp evaluator for educational games"
-  :in-order-to ((test-op (test-op "omoikane-lisp/tests"))))
+  :in-order-to ((test-op (test-op "wardlisp/tests"))))
 
-(defsystem "omoikane-lisp/tests"
+(defsystem "wardlisp/tests"
   :author ""
   :license ""
-  :depends-on ("omoikane-lisp"
+  :depends-on ("wardlisp"
                "rove")
   :serial t
   :components ((:module "tests"
@@ -31,5 +31,5 @@
                  (:file "evaluator-test")
                  (:file "safety-test")
                  (:file "integration-test"))))
-  :description "Test system for omoikane-lisp"
+  :description "Test system for wardlisp"
   :perform (test-op (op c) (symbol-call :rove :run c)))

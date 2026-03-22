@@ -1,4 +1,4 @@
-(defpackage :omoikane-lisp/src/types
+(defpackage :wardlisp/src/types
   (:use :cl)
   (:export
    ;; Cons cell
@@ -17,21 +17,21 @@
    #:exec-ctx-steps-used #:exec-ctx-max-depth-reached
    #:exec-ctx-max-integer
    ;; Conditions
-   #:omoikane-error #:omoikane-error-message
-   #:omoikane-parse-error
-   #:omoikane-name-error
-   #:omoikane-type-error
-   #:omoikane-arity-error
-   #:omoikane-step-limit-exceeded
-   #:omoikane-recursion-limit-exceeded
-   #:omoikane-memory-limit-exceeded
-   #:omoikane-integer-limit-exceeded
-   #:omoikane-output-limit-exceeded
-   #:omoikane-timeout-exceeded
-   #:omoikane-internal-error
+   #:wardlisp-error #:wardlisp-error-message
+   #:wardlisp-parse-error
+   #:wardlisp-name-error
+   #:wardlisp-type-error
+   #:wardlisp-arity-error
+   #:wardlisp-step-limit-exceeded
+   #:wardlisp-recursion-limit-exceeded
+   #:wardlisp-memory-limit-exceeded
+   #:wardlisp-integer-limit-exceeded
+   #:wardlisp-output-limit-exceeded
+   #:wardlisp-timeout-exceeded
+   #:wardlisp-internal-error
    ;; Helpers
    #:consume-fuel #:track-depth #:track-cons #:check-integer))
-(in-package :omoikane-lisp/src/types)
+(in-package :wardlisp/src/types)
 
 ;;; --- Custom cons cell for allocation counting ---
 
@@ -78,22 +78,22 @@
 
 ;;; --- Error conditions ---
 
-(define-condition omoikane-error (error)
-  ((message :initarg :message :reader omoikane-error-message
+(define-condition wardlisp-error (error)
+  ((message :initarg :message :reader wardlisp-error-message
             :initform ""))
-  (:report (lambda (c s) (format s "~a" (omoikane-error-message c)))))
+  (:report (lambda (c s) (format s "~a" (wardlisp-error-message c)))))
 
-(define-condition omoikane-parse-error (omoikane-error) ())
-(define-condition omoikane-name-error (omoikane-error) ())
-(define-condition omoikane-type-error (omoikane-error) ())
-(define-condition omoikane-arity-error (omoikane-error) ())
-(define-condition omoikane-step-limit-exceeded (omoikane-error) ())
-(define-condition omoikane-recursion-limit-exceeded (omoikane-error) ())
-(define-condition omoikane-memory-limit-exceeded (omoikane-error) ())
-(define-condition omoikane-integer-limit-exceeded (omoikane-error) ())
-(define-condition omoikane-output-limit-exceeded (omoikane-error) ())
-(define-condition omoikane-timeout-exceeded (omoikane-error) ())
-(define-condition omoikane-internal-error (omoikane-error) ())
+(define-condition wardlisp-parse-error (wardlisp-error) ())
+(define-condition wardlisp-name-error (wardlisp-error) ())
+(define-condition wardlisp-type-error (wardlisp-error) ())
+(define-condition wardlisp-arity-error (wardlisp-error) ())
+(define-condition wardlisp-step-limit-exceeded (wardlisp-error) ())
+(define-condition wardlisp-recursion-limit-exceeded (wardlisp-error) ())
+(define-condition wardlisp-memory-limit-exceeded (wardlisp-error) ())
+(define-condition wardlisp-integer-limit-exceeded (wardlisp-error) ())
+(define-condition wardlisp-output-limit-exceeded (wardlisp-error) ())
+(define-condition wardlisp-timeout-exceeded (wardlisp-error) ())
+(define-condition wardlisp-internal-error (wardlisp-error) ())
 
 ;;; --- Resource control helpers ---
 
@@ -102,7 +102,7 @@
   (decf (exec-ctx-fuel ctx) amount)
   (incf (exec-ctx-steps-used ctx) amount)
   (when (<= (exec-ctx-fuel ctx) 0)
-    (error 'omoikane-step-limit-exceeded
+    (error 'wardlisp-step-limit-exceeded
            :message (format nil "Step limit exceeded after ~d steps"
                             (exec-ctx-steps-used ctx)))))
 
@@ -112,7 +112,7 @@
   (when (> (exec-ctx-current-depth ctx) (exec-ctx-max-depth-reached ctx))
     (setf (exec-ctx-max-depth-reached ctx) (exec-ctx-current-depth ctx)))
   (when (> (exec-ctx-current-depth ctx) (exec-ctx-max-depth ctx))
-    (error 'omoikane-recursion-limit-exceeded
+    (error 'wardlisp-recursion-limit-exceeded
            :message (format nil "Recursion depth ~d exceeds limit ~d"
                             (exec-ctx-current-depth ctx)
                             (exec-ctx-max-depth ctx)))))
@@ -121,7 +121,7 @@
   "Track cons cell allocation. Signals memory-limit-exceeded when over."
   (incf (exec-ctx-cons-count ctx) count)
   (when (> (exec-ctx-cons-count ctx) (exec-ctx-max-cons ctx))
-    (error 'omoikane-memory-limit-exceeded
+    (error 'wardlisp-memory-limit-exceeded
            :message (format nil "Cons allocation ~d exceeds limit ~d"
                             (exec-ctx-cons-count ctx)
                             (exec-ctx-max-cons ctx)))))
@@ -129,7 +129,7 @@
 (defun check-integer (ctx value)
   "Check integer is within allowed range. Signals integer-limit-exceeded if not."
   (when (> (abs value) (exec-ctx-max-integer ctx))
-    (error 'omoikane-integer-limit-exceeded
+    (error 'wardlisp-integer-limit-exceeded
            :message (format nil "Integer ~d exceeds limit ~d"
                             value (exec-ctx-max-integer ctx))))
   value)

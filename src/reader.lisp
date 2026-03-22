@@ -1,15 +1,15 @@
-(defpackage :omoikane-lisp/src/reader
-  (:use :cl :omoikane-lisp/src/types)
-  (:export #:omoikane-read #:omoikane-read-program))
-(in-package :omoikane-lisp/src/reader)
+(defpackage :wardlisp/src/reader
+  (:use :cl :wardlisp/src/types)
+  (:export #:wardlisp-read #:wardlisp-read-program))
+(in-package :wardlisp/src/reader)
 
-(defun omoikane-read (input)
+(defun wardlisp-read (input)
   "Read a single expression from INPUT string."
   (multiple-value-bind (expr pos) (read-expr input 0)
     (declare (ignore pos))
     expr))
 
-(defun omoikane-read-program (input)
+(defun wardlisp-read-program (input)
   "Read all top-level expressions from INPUT string. Returns a list."
   (let ((exprs '())
         (pos 0)
@@ -25,14 +25,14 @@
   "Parse one expression starting at POS. Returns (values expr new-pos)."
   (setf pos (skip-whitespace-and-comments input pos))
   (when (>= pos (length input))
-    (error 'omoikane-parse-error :message "Unexpected end of input"))
+    (error 'wardlisp-parse-error :message "Unexpected end of input"))
   (let ((ch (char input pos)))
     (cond
       ((char= ch #\() (read-list input (1+ pos)))
-      ((char= ch #\)) (error 'omoikane-parse-error
+      ((char= ch #\)) (error 'wardlisp-parse-error
                               :message "Unexpected closing parenthesis"))
       ((char= ch #\') (read-quote input (1+ pos)))
-      ((char= ch #\#) (error 'omoikane-parse-error
+      ((char= ch #\#) (error 'wardlisp-parse-error
                               :message "Reader macros (#) are not allowed"))
       (t (read-atom input pos)))))
 
@@ -42,7 +42,7 @@
     (loop
       (setf pos (skip-whitespace-and-comments input pos))
       (when (>= pos (length input))
-        (error 'omoikane-parse-error :message "Unterminated list"))
+        (error 'wardlisp-parse-error :message "Unterminated list"))
       (when (char= (char input pos) #\))
         (return (values (nreverse elements) (1+ pos))))
       (multiple-value-bind (expr new-pos) (read-expr input pos)
@@ -61,12 +61,12 @@
     (loop while (and (< pos len) (atom-char-p (char input pos)))
           do (incf pos))
     (when (= start pos)
-      (error 'omoikane-parse-error
+      (error 'wardlisp-parse-error
              :message (format nil "Unexpected character: ~a"
                               (char input start))))
     (let ((token (subseq input start pos)))
       (when (find #\: token)
-        (error 'omoikane-parse-error
+        (error 'wardlisp-parse-error
                :message (format nil "Package prefix not allowed: ~a" token)))
       (values (parse-token token) pos))))
 
@@ -89,7 +89,7 @@
          (every #'digit-char-p (subseq token start)))))
 
 (defun atom-char-p (ch)
-  "Is CH a valid atom character for omoikane-lisp?"
+  "Is CH a valid atom character for wardlisp?"
   (and (not (char= ch #\())
        (not (char= ch #\)))
        (not (char= ch #\'))

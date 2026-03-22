@@ -1,6 +1,6 @@
-(defpackage :omoikane-lisp/tests/integration-test
-  (:use :cl :rove :omoikane-lisp :omoikane-lisp/src/types))
-(in-package :omoikane-lisp/tests/integration-test)
+(defpackage :wardlisp/tests/integration-test
+  (:use :cl :rove :wardlisp :wardlisp/src/types))
+(in-package :wardlisp/tests/integration-test)
 
 ;;; PRD Acceptance Criterion 1: user functions + recursion
 (deftest test-factorial
@@ -42,7 +42,7 @@
   (multiple-value-bind (result metrics)
       (evaluate "(define (loop) (loop)) (loop)" :fuel 100)
     (ok (null result))
-    (ok (eq 'omoikane-step-limit-exceeded (getf metrics :error-type)))))
+    (ok (eq 'wardlisp-step-limit-exceeded (getf metrics :error-type)))))
 
 ;;; PRD Acceptance Criterion 3: huge list stops
 (deftest test-huge-list-halts
@@ -53,20 +53,20 @@
         (huge 10000 nil)"
         :max-cons 50 :fuel 100000)
     (ok (null result))
-    (ok (eq 'omoikane-memory-limit-exceeded (getf metrics :error-type)))))
+    (ok (eq 'wardlisp-memory-limit-exceeded (getf metrics :error-type)))))
 
 ;;; PRD Acceptance Criterion 5: no file/network/OS
 (deftest test-no-file-access
   (multiple-value-bind (result metrics)
       (evaluate "(open \"foo.txt\")")
     (ok (null result))
-    (ok (eq 'omoikane-name-error (getf metrics :error-type)))))
+    (ok (eq 'wardlisp-name-error (getf metrics :error-type)))))
 
 (deftest test-no-system-access
   (multiple-value-bind (result metrics)
       (evaluate "(run-program \"ls\")")
     (ok (null result))
-    (ok (eq 'omoikane-name-error (getf metrics :error-type)))))
+    (ok (eq 'wardlisp-name-error (getf metrics :error-type)))))
 
 ;;; PRD Acceptance Criterion 6: metrics returned
 (deftest test-metrics-returned
@@ -99,20 +99,20 @@
   (multiple-value-bind (result metrics)
       (evaluate "(+ 1")
     (ok (null result))
-    (ok (eq 'omoikane-parse-error (getf metrics :error-type)))
+    (ok (eq 'wardlisp-parse-error (getf metrics :error-type)))
     (ok (stringp (getf metrics :error-message)))))
 
 (deftest test-evaluate-type-error
   (multiple-value-bind (result metrics)
       (evaluate "(+ 1 t)")
     (ok (null result))
-    (ok (eq 'omoikane-type-error (getf metrics :error-type)))))
+    (ok (eq 'wardlisp-type-error (getf metrics :error-type)))))
 
 (deftest test-evaluate-arity-error
   (multiple-value-bind (result metrics)
       (evaluate "((lambda (x) x) 1 2)")
     (ok (null result))
-    (ok (eq 'omoikane-arity-error (getf metrics :error-type)))))
+    (ok (eq 'wardlisp-arity-error (getf metrics :error-type)))))
 
 ;;; --- Coverage: evaluate with output ---
 (deftest test-evaluate-output

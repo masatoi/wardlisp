@@ -1,8 +1,8 @@
-(defpackage :omoikane-lisp/tests/evaluator-test
+(defpackage :wardlisp/tests/evaluator-test
   (:use :cl :rove
-        :omoikane-lisp/src/types
-        :omoikane-lisp/src/evaluator))
-(in-package :omoikane-lisp/tests/evaluator-test)
+        :wardlisp/src/types
+        :wardlisp/src/evaluator))
+(in-package :wardlisp/tests/evaluator-test)
 
 (defun eval1 (code &key (fuel 1000))
   "Helper: parse and evaluate a single expression."
@@ -67,7 +67,7 @@
 ;; --- Step counting ---
 (deftest test-eval-step-counting
   (ok (signals (eval1 "(define (f x) (f x)) (f 1)" :fuel 100)
-               'omoikane-step-limit-exceeded)))
+               'wardlisp-step-limit-exceeded)))
 
 ;; --- Arithmetic builtins ---
 (deftest test-builtin-add
@@ -137,8 +137,8 @@
 
 ;;; --- Coverage: quote arity error ---
 (deftest test-eval-quote-arity
-  (ok (signals (eval1 "(quote)") 'omoikane-arity-error))
-  (ok (signals (eval1 "(quote a b)") 'omoikane-arity-error)))
+  (ok (signals (eval1 "(quote)") 'wardlisp-arity-error))
+  (ok (signals (eval1 "(quote a b)") 'wardlisp-arity-error)))
 
 ;;; --- Coverage: quote with boolean literals ---
 (deftest test-eval-quote-boolean
@@ -147,18 +147,18 @@
 
 ;;; --- Coverage: if arity error ---
 (deftest test-eval-if-arity
-  (ok (signals (eval1 "(if)") 'omoikane-arity-error))
-  (ok (signals (eval1 "(if t)") 'omoikane-arity-error))
-  (ok (signals (eval1 "(if t 1 2 3)") 'omoikane-arity-error)))
+  (ok (signals (eval1 "(if)") 'wardlisp-arity-error))
+  (ok (signals (eval1 "(if t)") 'wardlisp-arity-error))
+  (ok (signals (eval1 "(if t 1 2 3)") 'wardlisp-arity-error)))
 
 ;;; --- Coverage: let arity error ---
 (deftest test-eval-let-arity
-  (ok (signals (eval1 "(let ())") 'omoikane-arity-error)))
+  (ok (signals (eval1 "(let ())") 'wardlisp-arity-error)))
 
 ;;; --- Coverage: lambda arity error and multi-body ---
 (deftest test-eval-lambda-arity
-  (ok (signals (eval1 "(lambda)") 'omoikane-arity-error))
-  (ok (signals (eval1 "(lambda (x))") 'omoikane-arity-error)))
+  (ok (signals (eval1 "(lambda)") 'wardlisp-arity-error))
+  (ok (signals (eval1 "(lambda (x))") 'wardlisp-arity-error)))
 
 (deftest test-eval-lambda-multi-body
   (ok (= 3 (eval1 "((lambda (x) 1 2 (+ x 1)) 2)"))))
@@ -174,7 +174,7 @@
 
 ;;; --- Coverage: define invalid target ---
 (deftest test-eval-define-invalid-target
-  (ok (signals (eval1 "(define 42 10)") 'omoikane-parse-error)))
+  (ok (signals (eval1 "(define 42 10)") 'wardlisp-parse-error)))
 
 ;;; --- Coverage: cond body-less clause returning test value ---
 (deftest test-eval-cond-bodyless
@@ -183,15 +183,15 @@
 
 ;;; --- Coverage: builtin arity error ---
 (deftest test-builtin-arity-error
-  (ok (signals (eval1 "(car 1 2)") 'omoikane-arity-error))
-  (ok (signals (eval1 "(cdr 1 2)") 'omoikane-arity-error))
-  (ok (signals (eval1 "(not 1 2)") 'omoikane-arity-error))
-  (ok (signals (eval1 "(null? 1 2)") 'omoikane-arity-error)))
+  (ok (signals (eval1 "(car 1 2)") 'wardlisp-arity-error))
+  (ok (signals (eval1 "(cdr 1 2)") 'wardlisp-arity-error))
+  (ok (signals (eval1 "(not 1 2)") 'wardlisp-arity-error))
+  (ok (signals (eval1 "(null? 1 2)") 'wardlisp-arity-error)))
 
 ;;; --- Coverage: non-function call ---
 (deftest test-non-function-call
-  (ok (signals (eval1 "(42)") 'omoikane-type-error))
-  (ok (signals (eval1 "(t 1)") 'omoikane-type-error)))
+  (ok (signals (eval1 "(42)") 'wardlisp-type-error))
+  (ok (signals (eval1 "(t 1)") 'wardlisp-type-error)))
 
 ;;; --- Coverage: comparison builtins <=, >, >= ---
 (deftest test-builtin-le
@@ -211,14 +211,14 @@
 
 ;;; --- Coverage: sub zero args ---
 (deftest test-builtin-sub-zero-args
-  (ok (signals (eval1 "(-)") 'omoikane-arity-error)))
+  (ok (signals (eval1 "(-)") 'wardlisp-arity-error)))
 
 ;;; --- Coverage: div/mod zero division ---
 (deftest test-builtin-div-zero
-  (ok (signals (eval1 "(div 1 0)") 'omoikane-type-error)))
+  (ok (signals (eval1 "(div 1 0)") 'wardlisp-type-error)))
 
 (deftest test-builtin-mod-zero
-  (ok (signals (eval1 "(mod 1 0)") 'omoikane-type-error)))
+  (ok (signals (eval1 "(mod 1 0)") 'wardlisp-type-error)))
 
 ;;; --- Coverage: car/cdr of nil ---
 (deftest test-builtin-car-nil
