@@ -9,12 +9,14 @@
 
 (defun eval-string (input &key (fuel 10000) (max-depth 100)
                                (max-cons 10000) (max-output 1000)
-                               (max-integer (expt 2 64)))
+                               (max-integer (expt 2 64))
+                               (max-expr-depth 1000))
   "Parse and evaluate INPUT string. Returns the result of the last expression."
   (let ((program (wardlisp-read-program input))
         (ctx (make-exec-ctx :fuel fuel :max-depth max-depth
                             :max-cons max-cons :max-output max-output
-                            :max-integer max-integer))
+                            :max-integer max-integer
+                            :max-expr-depth max-expr-depth))
         (env (make-initial-env)))
     (let ((result nil))
       (dolist (expr program result)
@@ -28,7 +30,11 @@
     ((eq expr t) t)
     ((null expr) nil)
     ((stringp expr) (env-lookup env expr))
-    ((consp expr) (eval-compound expr env ctx))
+    ((consp expr)
+     (track-expr-depth ctx 1)
+     (unwind-protect
+          (eval-compound expr env ctx)
+       (track-expr-depth ctx -1)))
     (t (error 'wardlisp-internal-error
               :message (format nil "Unknown expression type: ~s" expr)))))
 

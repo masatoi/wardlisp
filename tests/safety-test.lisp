@@ -6,9 +6,11 @@
 (in-package :wardlisp/tests/safety-test)
 
 (defun eval-safe (code &key (fuel 100) (max-depth 10) (max-cons 50)
-                            (max-output 100) (max-integer 1000000))
+                            (max-output 100) (max-integer 1000000)
+                            (max-expr-depth 1000))
   (eval-string code :fuel fuel :max-depth max-depth :max-cons max-cons
-                    :max-output max-output :max-integer max-integer))
+                    :max-output max-output :max-integer max-integer
+                    :max-expr-depth max-expr-depth))
 
 ;; --- Step limit ---
 (deftest test-infinite-recursion-stops
@@ -95,4 +97,14 @@
           (make-string 1000 :initial-element #\))
           ")")
         :fuel 1000000 :max-cons 1000000)
+       'wardlisp-error)))
+
+(deftest test-deep-if-nesting-stops
+  (ok (signals
+       (eval-safe
+        (format nil "~{~a~}1~{~a~}"
+          (loop repeat 800 collect "(if t ")
+          (loop repeat 800 collect ")"))
+        :fuel 1000000
+        :max-expr-depth 100)
        'wardlisp-error)))

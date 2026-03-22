@@ -16,6 +16,7 @@
    #:exec-ctx-output #:exec-ctx-max-output
    #:exec-ctx-steps-used #:exec-ctx-max-depth-reached
    #:exec-ctx-max-integer
+   #:exec-ctx-expr-depth #:exec-ctx-max-expr-depth
    ;; Conditions
    #:wardlisp-error #:wardlisp-error-message
    #:wardlisp-parse-error
@@ -30,7 +31,7 @@
    #:wardlisp-timeout-exceeded
    #:wardlisp-internal-error
    ;; Helpers
-   #:consume-fuel #:track-depth #:track-cons #:check-integer))
+   #:consume-fuel #:track-depth #:track-expr-depth #:track-cons #:check-integer))
 (in-package :wardlisp/src/types)
 
 ;;; --- Custom cons cell for allocation counting ---
@@ -62,7 +63,8 @@
 (defstruct (exec-ctx (:constructor make-exec-ctx
                          (&key (fuel 10000) (max-depth 100)
                                (max-cons 10000) (max-output 1000)
-                               (max-integer (expt 2 64)))))
+                               (max-integer (expt 2 64))
+                               (max-expr-depth 1000))))
   "Mutable execution context tracking resource consumption."
   (fuel 10000 :type integer)
   (max-depth 100 :type fixnum)
@@ -74,7 +76,9 @@
   (max-output 1000 :type fixnum)
   (steps-used 0 :type integer)
   (max-depth-reached 0 :type fixnum)
-  (max-integer (expt 2 64) :type integer))
+  (max-integer (expt 2 64) :type integer)
+  (expr-depth 0 :type fixnum)
+  (max-expr-depth 1000 :type fixnum))
 
 ;;; --- Error conditions ---
 
@@ -116,6 +120,15 @@
            :message (format nil "Recursion depth ~d exceeds limit ~d"
                             (exec-ctx-current-depth ctx)
                             (exec-ctx-max-depth ctx)))))
+
+(defun track-expr-depth (ctx delta)
+  "Adjust expression depth. Signals recursion-limit-exceeded when too deep."
+  (incf (exec-ctx-expr-depth ctx) delta)
+  (when (> (exec-ctx-expr-depth ctx) (exec-ctx-max-expr-depth ctx))
+    (error 'wardlisp-recursion-limit-exceeded
+           :message (format nil "Expression nesting depth ~d exceeds limit ~d"
+                            (exec-ctx-expr-depth ctx)
+                            (exec-ctx-max-expr-depth ctx)))))
 
 (defun track-cons (ctx &optional (count 1))
   "Track cons cell allocation. Signals memory-limit-exceeded when over."
