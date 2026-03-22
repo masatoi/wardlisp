@@ -30,33 +30,37 @@
   (when (>= pos (length input))
     (error 'wardlisp-parse-error :message "Unexpected end of input"))
   (let ((ch (char input pos)))
-    (cond
-      ((char= ch #\() (read-list input (1+ pos) (1+ depth)))
-      ((char= ch #\))
-       (error 'wardlisp-parse-error
-              :message "Unexpected closing parenthesis"))
-      ((char= ch #\') (read-quote input (1+ pos) depth))
-      ((char= ch #\#)
-       (error 'wardlisp-parse-error
-              :message "Reader macros (#) are not allowed"))
-      (t (read-atom input pos)))))
+    (cond ((char= ch #\() (read-list input (1+ pos) (1+ depth)))
+          ((char= ch #\))
+           (error 'wardlisp-parse-error :message
+                  (format nil "Unexpected closing parenthesis at ~a"
+                          (pos-to-location input pos))))
+          ((char= ch #\') (read-quote input (1+ pos) depth))
+          ((char= ch #\#)
+           (error 'wardlisp-parse-error :message
+                  (format nil "Reader macros (#) are not allowed at ~a"
+                          (pos-to-location input pos))))
+          (t (read-atom input pos)))))
 
 (defun read-list (input pos &optional (depth 0))
   "Parse list body after opening paren. Returns (values list new-pos)."
   (when (> depth +max-parse-depth+)
-    (error 'wardlisp-parse-error
-           :message (format nil "Nesting depth ~d exceeds limit ~d"
-                            depth +max-parse-depth+)))
-  (let ((elements '()))
-    (loop
-      (setf pos (skip-whitespace-and-comments input pos))
-      (when (>= pos (length input))
-        (error 'wardlisp-parse-error :message "Unterminated list"))
-      (when (char= (char input pos) #\))
-        (return (values (nreverse elements) (1+ pos))))
-      (multiple-value-bind (expr new-pos) (read-expr input pos depth)
-        (push expr elements)
-        (setf pos new-pos)))))
+    (error 'wardlisp-parse-error :message
+           (format nil "Nesting depth ~d exceeds limit ~d" depth
+                   +max-parse-depth+)))
+  (let ((elements 'nil)
+        (open-pos pos))
+    (loop (setf pos (skip-whitespace-and-comments input pos))
+          (when (>= pos (length input))
+            (error 'wardlisp-parse-error :message
+                   (format nil "Unterminated list starting at ~a"
+                           (pos-to-location input (1- open-pos)))))
+          (when (char= (char input pos) #\))
+            (return (values (nreverse elements) (1+ pos))))
+          (multiple-value-bind (expr new-pos)
+              (read-expr input pos depth)
+            (push expr elements)
+            (setf pos new-pos)))))
 
 (defun read-quote (input pos &optional (depth 0))
   "Parse quoted expression after quote character."
@@ -65,27 +69,33 @@
 
 (defun read-atom (input pos)
   "Parse an atom (integer or symbol) starting at POS."
-  (let ((start pos)
-        (len (length input)))
+  (let ((start pos) (len (length input)))
     (loop while (and (< pos len) (atom-char-p (char input pos)))
           do (incf pos))
     (when (= start pos)
-      (error 'wardlisp-parse-error
-             :message (format nil "Unexpected character: ~a"
-                              (char input start))))
+      (error 'wardlisp-parse-error :message
+             (format nil "Unexpected character: ~a at ~a"
+                     (char input start) (pos-to-location input start))))
     (let ((token (subseq input start pos)))
       (when (find #\: token)
-        (error 'wardlisp-parse-error
-               :message (format nil "Package prefix not allowed: ~a" token)))
+        (error 'wardlisp-parse-error :message
+               (format nil "Package prefix not allowed: ~a at ~a"
+                       token (pos-to-location input start))))
       (values (parse-token token) pos))))
 
 (defun parse-token (token)
   "Convert a token string to an AST value."
-  (cond
-    ((string= token "t") t)
-    ((string= token "nil") nil)
-    ((integer-token-p token) (parse-integer token :radix 10))
-    (t (string-downcase token))))
+  (let ((lower (string-downcase token)))
+    (cond
+      ((string= lower "t") t)
+      ((string= lower "nil") nil)
+      ((integer-token-p token)
+       (when (> (length token) 100)
+         (error 'wardlisp-parse-error
+                :message (format nil "Integer literal too long (~d digits, max 100)"
+                                 (length token))))
+       (parse-integer token :radix 10))
+      (t lower))))
 
 (defun integer-token-p (token)
   "Check if TOKEN looks like an integer."
@@ -131,3 +141,12 @@
                           (char/= (char input pos) #\Newline))
                do (incf pos)))
         (t (return pos))))))
+
+(defun pos-to-location (input pos)
+  "Convert character position to line:column string."
+  (let ((line 1) (col 1))
+    (loop for i below (min pos (length input))
+          do (if (char= (char input i) #\Newline)
+                 (progn (incf line) (setf col 1))
+                 (incf col)))
+    (format nil "~d:~d" line col)))

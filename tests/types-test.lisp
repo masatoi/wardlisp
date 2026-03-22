@@ -24,6 +24,11 @@
     (consume-fuel ctx)
     (ok (= 3 (exec-ctx-fuel ctx)))
     (consume-fuel ctx 2)
+    (ok (= 1 (exec-ctx-fuel ctx)))
+    ;; fuel=1: one more consume brings it to 0 (exactly exhausted, still ok)
+    (consume-fuel ctx)
+    (ok (= 0 (exec-ctx-fuel ctx)))
+    ;; fuel=0: next consume brings it to -1 (exceeded)
     (ok (signals (consume-fuel ctx) 'wardlisp-step-limit-exceeded))))
 
 (deftest test-track-depth

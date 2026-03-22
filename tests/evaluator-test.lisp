@@ -31,12 +31,14 @@
   (ok (eq nil (eval1 "(if nil 3)"))))
 
 ;; --- Let ---
+
 (deftest test-eval-let
   (ok (= 42 (eval1 "(let ((x 42)) x)")))
   (ok (= 3 (eval1 "(let ((x 1) (y 2)) (+ x y))")))
-  ;; Sequential binding (Clojure-style): earlier bindings visible to later ones
-  (ok (= 2 (eval1 "(let ((x 1) (y (+ x 1))) y)")))
-  ;; let* is an alias for let
+  ;; Parallel binding: earlier bindings NOT visible to later ones
+  (ok (signals (eval1 "(let ((x 1) (y (+ x 1))) y)")
+               'wardlisp/src/types:wardlisp-name-error))
+  ;; let* has sequential bindings: earlier visible to later
   (ok (= 2 (eval1 "(let* ((x 1) (y (+ x 1))) y)"))))
 
 ;; --- Lambda & application ---

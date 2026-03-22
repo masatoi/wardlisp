@@ -234,20 +234,32 @@ y                   ;=> name-error: Undefined variable: y
 (if 0 1 2)      ;=> 1  (0 は真)
 ```
 
-### 5.3 let
+### 5.3 let (並列束縛)
 
 ```
 (let ((name1 val1) (name2 val2) ...) body1 body2 ...)
 ```
 
-逐次束縛。各束縛は前の束縛が見える環境で順に評価される (Clojure 方式)。`body` を順に評価し、最後の式の値を返す。
+並列束縛 (Scheme 方式)。すべての `val` を外側の環境で評価してから、結果を一括して `name` に束縛する。各 `val` の評価時に他の束縛は見えない。`body` を順に評価し、最後の式の値を返す。
 
 ```scheme
 (let ((x 1) (y 2)) (+ x y))              ;=> 3
-(let ((x 1) (y (+ x 1))) y)              ;=> 2
+(let ((x 1) (y (+ x 1))) y)              ;=> name-error (x は束縛前)
 ```
 
-> **注**: Common Lisp や Scheme の `let` とは異なり、並列束縛ではない。`let*` は `let` の別名として受け付けるが、挙動は同一である。
+### 5.3.1 let* (逐次束縛)
+
+```
+(let* ((name1 val1) (name2 val2) ...) body1 body2 ...)
+```
+
+逐次束縛。各束縛は前の束縛が見える環境で順に評価される。
+
+```scheme
+(let* ((x 1) (y (+ x 1))) y)             ;=> 2
+```
+
+> **注**: `let` と `let*` は異なるセマンティクスを持つ。依存関係のある束縛には `let*` を使用すること。
 
 ### 5.4 lambda
 
@@ -310,15 +322,16 @@ y                   ;=> name-error: Undefined variable: y
 ### 5.6 cond
 
 ```
-(cond (test1 expr1) (test2 expr2) ... )
+(cond (test1 body1...) (test2 body2...) ... )
 ```
 
-各節の `test` を順に評価し、最初に真となった節の `expr` を評価して返す。すべての節が偽なら `nil` を返す。
+各節の `test` を順に評価し、最初に真となった節の `body` を暗黙の `begin` として順に評価し、最後の値を返す。すべての節が偽なら `nil` を返す。
 
-`expr` を省略した場合、`test` の評価結果自体を返す:
+`body` を省略した場合、`test` の評価結果自体を返す:
 
 ```scheme
 (cond (nil 1) (42))                       ;=> 42
+(cond (t (print 1) (print 2) 3))         ;=> 3 (出力: "1\n2\n")
 ```
 
 ### 5.7 and
@@ -424,6 +437,15 @@ y                   ;=> name-error: Undefined variable: y
 
 すべての算術関数は整数のみを受け付ける。整数以外を渡すと `type-error` となる。`div` および `mod` でゼロ除算を行うと `type-error` となる。
 
+`div` は 0 方向への切り捨て (truncation toward zero) を行い、`mod` は `div` と整合する剰余 (truncation remainder) を返す。すなわち、常に `a = (div a b) * b + (mod a b)` が成り立つ。`mod` の結果は被除数と同符号になる:
+
+```scheme
+(div -7 2)   ;=> -3  (0 方向切り捨て)
+(mod -7 2)   ;=> -1  (被除数と同符号)
+(div 7 -2)   ;=> -3
+(mod 7 -2)   ;=> 1
+```
+
 ### 7.2 比較演算
 
 | 関数 | 引数 | 説明 | 例 |
@@ -499,9 +521,11 @@ y                   ;=> name-error: Undefined variable: y
 
 | 型の組み合わせ | 比較方法 |
 |--------------|---------|
+| 同一オブジェクト | 常に等値 (`eql` による同一性判定) |
 | `nil` 同士 | 常に等値 |
 | `t` 同士 | 常に等値 |
 | 整数同士 | 数値等値 |
+| シンボル同士 | 文字列等値 |
 | ペア同士 | `car` と `cdr` を再帰的に `equal?` で比較 |
 | その他 | 非等値 |
 

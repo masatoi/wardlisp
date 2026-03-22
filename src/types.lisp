@@ -113,7 +113,7 @@
   "Consume fuel from context. Signals step-limit-exceeded when exhausted."
   (decf (exec-ctx-fuel ctx) amount)
   (incf (exec-ctx-steps-used ctx) amount)
-  (when (<= (exec-ctx-fuel ctx) 0)
+  (when (< (exec-ctx-fuel ctx) 0)
     (error 'wardlisp-step-limit-exceeded
            :message (format nil "Step limit exceeded after ~d steps"
                             (exec-ctx-steps-used ctx)))))

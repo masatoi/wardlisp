@@ -113,66 +113,122 @@ Then/else branches are in tail position (use eval-inner)."
             nil))))
 
 (defun eval-let (args env ctx)
-  "Evaluate a let form with sequential bindings.
+  "Evaluate a let form with parallel bindings.
+All right-hand sides are evaluated in the outer environment before binding.
 Last body expression is in tail position (use eval-inner)."
   (when (< (length args) 2)
     (error 'wardlisp-arity-error :message "let requires bindings and body"))
-  (let ((bindings (first args))
-        (body (rest args))
-        (current-env env))
+  (let ((bindings (first args)) (body (rest args)))
+    (unless (listp bindings)
+      (error 'wardlisp-parse-error :message
+             (format nil "let: bindings must be a list, got ~s" bindings)))
     (dolist (binding bindings)
-      (let ((val (wardlisp-eval (second binding) current-env ctx)))
-        (setf current-env (env-extend current-env
-                                      (list (first binding))
-                                      (list val)))))
-    (let ((result nil))
-      (loop for (expr . rest) on body
-            do (setf result (if rest
-                                (wardlisp-eval expr current-env ctx)
-                                (eval-inner expr current-env ctx))))
-      result)))
+      (unless (and (listp binding) (= 2 (length binding)) (stringp (first binding)))
+        (error 'wardlisp-parse-error :message
+               (format nil "let: each binding must be (name expr), got ~s" binding))))
+    ;; Evaluate all RHS in outer environment first (parallel semantics)
+    (let* ((names (mapcar #'first bindings))
+           (vals (mapcar (lambda (b) (wardlisp-eval (second b) env ctx)) bindings))
+           (new-env (env-extend env names vals)))
+      (let ((result nil))
+        (loop for (expr . rest) on body
+              do (setf result
+                       (if rest
+                           (wardlisp-eval expr new-env ctx)
+                           (eval-inner expr new-env ctx))))
+        result))))
 
 (defun eval-let* (args env ctx)
-  "Evaluate a let* form (alias for let)."
-  (eval-let args env ctx))
+  "Evaluate a let* form with sequential bindings.
+Each binding is visible to subsequent ones.
+Last body expression is in tail position (use eval-inner)."
+  (when (< (length args) 2)
+    (error 'wardlisp-arity-error :message "let* requires bindings and body"))
+  (let ((bindings (first args)) (body (rest args)) (current-env env))
+    (unless (listp bindings)
+      (error 'wardlisp-parse-error :message
+             (format nil "let*: bindings must be a list, got ~s" bindings)))
+    (dolist (binding bindings)
+      (unless (and (listp binding) (= 2 (length binding)) (stringp (first binding)))
+        (error 'wardlisp-parse-error :message
+               (format nil "let*: each binding must be (name expr), got ~s" binding)))
+      (let ((val (wardlisp-eval (second binding) current-env ctx)))
+        (setf current-env
+                (env-extend current-env (list (first binding)) (list val)))))
+    (let ((result nil))
+      (loop for (expr . rest) on body
+            do (setf result
+                       (if rest
+                           (wardlisp-eval expr current-env ctx)
+                           (eval-inner expr current-env ctx))))
+      result)))
 
 (defun eval-lambda (args env)
   "Evaluate a lambda form, creating a closure."
   (when (< (length args) 2)
     (error 'wardlisp-arity-error :message "lambda requires params and body"))
-  (let ((params (first args))
-        (body (if (= 1 (length (rest args)))
-                  (second args)
-                  (cons "begin" (rest args)))))
-    (make-closure params body env)))
+  (let ((params (first args)))
+    (unless (listp params)
+      (error 'wardlisp-parse-error :message
+             (format nil "lambda: params must be a list, got ~s" params)))
+    (dolist (p params)
+      (unless (stringp p)
+        (error 'wardlisp-parse-error :message
+               (format nil "lambda: param must be a symbol, got ~s" p))))
+    (let ((body
+           (if (= 1 (length (rest args)))
+               (second args)
+               (cons "begin" (rest args)))))
+      (make-closure params body env))))
 
 (defun eval-define (args env ctx)
-  "Handle (define name value) and (define (name params...) body...)."
-  (let ((target (first args)))
-    (cond
-      ;; (define (f x y) body...) — function definition
-      ((consp target)
-       (let* ((name (first target))
-              (params (rest target))
-              (body (if (= 1 (length (rest args)))
-                        (second args)
-                        (cons "begin" (rest args))))
-              (closure (make-closure params body env name)))
-         ;; Self-reference: put closure in its own env
-         (let ((new-env (env-extend env (list name) (list closure))))
-           (setf (closure-env closure) new-env)
-           ;; Also add to calling env for subsequent defines
-           (let ((frame (list (cons name closure))))
-             (nconc env (list frame)))
-           closure)))
-      ;; (define name value)
-      ((stringp target)
-       (let ((value (wardlisp-eval (second args) env ctx)))
-         (let ((frame (list (cons target value))))
-           (nconc env (list frame)))
-         value))
-      (t (error 'wardlisp-parse-error
-                :message (format nil "Invalid define target: ~s" target))))))
+  "Handle (define name value) and (define (name params...) body...).
+Redefinition updates existing user binding rather than appending.
+Builtin bindings (first frame) are not overwritable."
+  (labels ((update-or-append (name value)
+             ;; Search user frames (skip first frame = builtins)
+             (loop for frame in (rest env)
+                   do (let ((pair (assoc name frame :test #'string=)))
+                        (when pair
+                          (setf (cdr pair) value)
+                          (return-from update-or-append))))
+             ;; Not found in user frames, append new frame
+             (nconc env (list (list (cons name value))))))
+    (let ((target (first args)))
+      (cond
+       ((consp target)
+        (let ((name (first target))
+              (params (rest target)))
+          (unless (stringp name)
+            (error 'wardlisp-parse-error :message
+                   (format nil "define: function name must be a symbol, got ~s" name)))
+          (dolist (p params)
+            (unless (stringp p)
+              (error 'wardlisp-parse-error :message
+                     (format nil "define: parameter must be a symbol, got ~s" p))))
+          (when (< (length (rest args)) 1)
+            (error 'wardlisp-arity-error :message
+                   "define: function form requires a body"))
+          (let* ((body
+                  (if (= 1 (length (rest args)))
+                      (second args)
+                      (cons "begin" (rest args))))
+                 (closure (make-closure params body env name)))
+            (let ((new-env (env-extend env (list name) (list closure))))
+              (setf (closure-env closure) new-env)
+              (update-or-append name closure)
+              closure))))
+       ((stringp target)
+        (unless (= (length args) 2)
+          (error 'wardlisp-arity-error :message
+                 (format nil "define: expected (define name value), got ~d argument~:p"
+                         (length args))))
+        (let ((value (wardlisp-eval (second args) env ctx)))
+          (update-or-append target value)
+          value))
+       (t
+        (error 'wardlisp-parse-error :message
+               (format nil "Invalid define target: ~s" target)))))))
 
 (defun eval-begin (args env ctx)
   "Evaluate a begin form.
@@ -188,11 +244,21 @@ Last expression is in tail position (use eval-inner)."
   "Evaluate a cond form.
 Result expressions are in tail position (use eval-inner)."
   (dolist (clause clauses nil)
+    (unless (listp clause)
+      (error 'wardlisp-parse-error :message
+             (format nil "cond: each clause must be a list, got ~s" clause)))
     (let ((test-result (wardlisp-eval (first clause) env ctx)))
       (when test-result
-        (return (if (rest clause)
-                    (eval-inner (second clause) env ctx)
-                    test-result))))))
+        (return
+         (if (rest clause)
+             (let ((result nil))
+               (loop for (expr . remaining) on (rest clause)
+                     do (setf result
+                              (if remaining
+                                  (wardlisp-eval expr env ctx)
+                                  (eval-inner expr env ctx))))
+               result)
+             test-result))))))
 
 (defun eval-and (args env ctx)
   "Evaluate an and form with short-circuit semantics.
@@ -247,7 +313,7 @@ Last argument is in tail position (use eval-inner)."
      (let ((params (closure-params func)))
        (when (/= (length params) (length args))
          (error 'wardlisp-arity-error
-                :message (format nil "~a expects ~d args, got ~d"
+                :message (format nil "~a expects ~d arg~:p, got ~d"
                                  (or (closure-name func) "lambda")
                                  (length params) (length args))))
        (let ((call-env (env-extend (closure-env func) params args)))
@@ -256,9 +322,9 @@ Last argument is in tail position (use eval-inner)."
      (when (and (builtin-arity func)
                 (/= (builtin-arity func) (length args)))
        (error 'wardlisp-arity-error
-              :message (format nil "~a expects ~d args, got ~d"
+              :message (format nil "~a expects ~d arg~:p, got ~d"
                                (builtin-name func)
                                (builtin-arity func) (length args))))
      (funcall (builtin-func func) args ctx))
     (t (error 'wardlisp-type-error
-              :message (format nil "Not a function: ~s" func)))))
+              :message (format nil "Not a function: ~a" (print-value func))))))

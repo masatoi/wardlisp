@@ -83,7 +83,7 @@
   (dolist (a args) (ensure-integer "mod" a))
   (when (zerop (second args))
     (error 'wardlisp-type-error :message "mod: division by zero"))
-  (cl:mod (first args) (second args)))
+  (rem (first args) (second args)))
 
 ;;; --- Comparison ---
 
@@ -159,8 +159,14 @@
   "Built-in length function. Count elements in an ocons list."
   (declare (ignore ctx))
   (let ((lst (first args)) (count 0))
+    (unless (or (null lst) (ocons-p lst))
+      (error 'wardlisp-type-error :message
+             (format nil "length: expected list, got ~a" (print-value lst))))
     (loop while (ocons-p lst)
           do (incf count) (setf lst (ocons-ocdr lst)))
+    (when lst
+      (error 'wardlisp-type-error :message
+             (format nil "length: improper list with tail ~a" (print-value lst))))
     count))
 
 (defun builtin-append (args ctx)
@@ -177,19 +183,27 @@
   (if (null lst)
       tail
       (progn
-        (unless (ocons-p lst)
-          (error 'wardlisp-type-error
-                 :message (format nil "append: expected list, got ~a" (print-value lst))))
-        (let* ((head (progn (track-cons ctx) (make-ocons (ocons-ocar lst) nil)))
-               (current head))
-          (setf lst (ocons-ocdr lst))
-          (loop while (ocons-p lst)
-                do (let ((new (progn (track-cons ctx) (make-ocons (ocons-ocar lst) nil))))
-                     (setf (ocons-ocdr current) new)
-                     (setf current new)
-                     (setf lst (ocons-ocdr lst))))
-          (setf (ocons-ocdr current) tail)
-          head))))
+       (unless (ocons-p lst)
+         (error 'wardlisp-type-error :message
+                (format nil "append: expected list, got ~a"
+                        (print-value lst))))
+       (let* ((head (progn (track-cons ctx) (make-ocons (ocons-ocar lst) nil)))
+              (current head))
+         (setf lst (ocons-ocdr lst))
+         (loop while (ocons-p lst)
+               do (let ((new
+                         (progn
+                          (track-cons ctx)
+                          (make-ocons (ocons-ocar lst) nil))))
+                    (setf (ocons-ocdr current) new)
+                    (setf current new)
+                    (setf lst (ocons-ocdr lst))))
+         (when (and lst (not (null lst)))
+           (error 'wardlisp-type-error :message
+                  (format nil "append: improper list with tail ~a"
+                          (print-value lst))))
+         (setf (ocons-ocdr current) tail)
+         head))))
 
 ;;; --- Other ---
 
@@ -216,17 +230,15 @@
 (defun wardlisp-equal (a b depth)
   "Recursive structural comparison with depth limit."
   (when (> depth 10000)
-    (error 'wardlisp-recursion-limit-exceeded
-           :message "equal?: comparison too deep"))
-  (cond
-    ((and (null a) (null b)) t)
-    ((and (eq a t) (eq b t)) t)
-    ((and (integerp a) (integerp b)) (cl:= a b))
-         ((and (stringp a) (stringp b)) (string= a b))
-    ((and (ocons-p a) (ocons-p b))
-     (and (wardlisp-equal (ocons-ocar a) (ocons-ocar b) (1+ depth))
-          (wardlisp-equal (ocons-ocdr a) (ocons-ocdr b) (1+ depth))))
-    (t nil)))
+    (error 'wardlisp-recursion-limit-exceeded :message
+           "equal?: comparison too deep"))
+  (cond ((eql a b) t)
+        ((and (integerp a) (integerp b)) (= a b))
+        ((and (stringp a) (stringp b)) (string= a b))
+        ((and (ocons-p a) (ocons-p b))
+         (and (wardlisp-equal (ocons-ocar a) (ocons-ocar b) (1+ depth))
+              (wardlisp-equal (ocons-ocdr a) (ocons-ocdr b) (1+ depth))))
+        (t nil)))
 
 (defun builtin-print (args ctx)
   "Built-in print function. Append string representation to output buffer."
@@ -242,29 +254,32 @@
 
 ;;; --- Value printing ---
 
-(defun print-value (value)
-  "Convert a runtime value to its string representation."
-  (cond
-    ((null value) "nil")
-    ((eq value t) "t")
-    ((integerp value) (format nil "~d" value))
-    ((stringp value) value)
-    ((ocons-p value) (print-ocons value))
-    ((closure-p value) (format nil "#<closure~@[ ~a~]>" (closure-name value)))
-    ((builtin-p value) (format nil "#<builtin ~a>" (builtin-name value)))
-    (t (format nil "#<unknown>"))))
+(defun print-value (value &optional (depth 0))
+  "Convert a runtime value to its string representation.
+Limits nesting depth to prevent host stack overflow."
+  (if (> depth 100)
+      "..."
+      (cond ((null value) "nil") ((eq value t) "t")
+            ((integerp value) (format nil "~d" value)) ((stringp value) value)
+            ((ocons-p value) (print-ocons value (1+ depth)))
+            ((closure-p value)
+             (format nil "#<closure~@[ ~a~]>" (closure-name value)))
+            ((builtin-p value) (format nil "#<builtin ~a>" (builtin-name value)))
+            (t (format nil "#<unknown>")))))
 
-(defun print-ocons (cell)
+(defun print-ocons (cell &optional (depth 0))
   "Print an ocons chain as a list or dotted pair."
-  (with-output-to-string (s)
-    (write-char #\( s)
-    (write-string (print-value (ocons-ocar cell)) s)
-    (let ((rest (ocons-ocdr cell)))
-      (loop while (ocons-p rest)
-            do (write-char #\Space s)
-               (write-string (print-value (ocons-ocar rest)) s)
-               (setf rest (ocons-ocdr rest)))
-      (unless (null rest)
-        (write-string " . " s)
-        (write-string (print-value rest) s)))
-    (write-char #\) s)))
+  (if (> depth 100)
+      "(...)"
+      (with-output-to-string (s)
+        (write-char #\( s)
+        (write-string (print-value (ocons-ocar cell) depth) s)
+        (let ((rest (ocons-ocdr cell)))
+          (loop while (ocons-p rest)
+                do (write-char #\  s)
+                   (write-string (print-value (ocons-ocar rest) depth) s)
+                   (setf rest (ocons-ocdr rest)))
+          (unless (null rest)
+            (write-string " . " s)
+            (write-string (print-value rest depth) s)))
+        (write-char #\) s))))
