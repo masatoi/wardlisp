@@ -108,3 +108,10 @@
         :fuel 1000000
         :max-expr-depth 100)
        'wardlisp-error)))
+
+(deftest test-reject-special-characters
+  (ok (signals (eval-safe "\"hello\"") 'wardlisp-parse-error))
+  (ok (signals (eval-safe "`x") 'wardlisp-parse-error))
+  (ok (signals (eval-safe ",x") 'wardlisp-parse-error))
+  (ok (signals (eval-safe "\\x") 'wardlisp-parse-error))
+  (ok (signals (eval-safe "|x|") 'wardlisp-parse-error)))

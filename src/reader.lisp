@@ -104,6 +104,11 @@
        (not (char= ch #\'))
        (not (char= ch #\;))
        (not (char= ch #\#))
+       (not (char= ch #\"))
+       (not (char= ch #\`))
+       (not (char= ch #\,))
+       (not (char= ch #\\))
+       (not (char= ch #\|))
        (not (whitespace-p ch))))
 
 (defun whitespace-p (ch)

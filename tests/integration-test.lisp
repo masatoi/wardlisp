@@ -58,13 +58,13 @@
 ;;; PRD Acceptance Criterion 5: no file/network/OS
 (deftest test-no-file-access
   (multiple-value-bind (result metrics)
-      (evaluate "(open \"foo.txt\")")
+      (evaluate "(open foo)")
     (ok (null result))
     (ok (eq 'wardlisp-name-error (getf metrics :error-type)))))
 
 (deftest test-no-system-access
   (multiple-value-bind (result metrics)
-      (evaluate "(run-program \"ls\")")
+      (evaluate "(run-program ls)")
     (ok (null result))
     (ok (eq 'wardlisp-name-error (getf metrics :error-type)))))
 
