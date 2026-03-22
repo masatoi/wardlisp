@@ -29,18 +29,31 @@ WardLisp is a Lisp-1 (like Scheme: functions and variables share a single namesp
 
 ### Special Forms
 
-`quote`, `if`, `let` (sequential binding), `lambda`, `define`, `cond`, `and`, `or`, `begin`
+`quote`, `if`, `let` (sequential binding), `lambda`, `define`, `cond`, `and`, `or`, `begin`, `apply`
 
 ### Builtins
 
 - **Arithmetic**: `+`, `-`, `*`, `div`, `mod`
 - **Comparison**: `=`, `<`, `<=`, `>`, `>=`
-- **Lists**: `cons`, `car`, `cdr`, `list`, `null?`, `atom?`, `length`
-- **Other**: `not`, `eq?`, `print`
+- **Lists**: `cons`, `car`, `cdr`, `list`, `null?`, `atom?`, `length`, `append`
+- **Equality**: `eq?` (shallow), `equal?` (deep structural)
+- **Other**: `not`, `print`
+
+### Tail Call Optimization
+
+Tail calls in supported positions (if branches, let/begin body, cond clauses, and/or last argument) are optimized via trampoline. Tail-recursive functions run in constant stack space regardless of iteration count.
+
+```scheme
+(define (sum-iter n acc)
+  (if (= n 0) acc
+      (sum-iter (- n 1) (+ acc n))))
+(sum-iter 50000 0)
+;=> 1250025000
+```
 
 ### What's Intentionally Missing
 
-No macros, no mutation (`set!`/`setf`), no loops, no `eval`/`apply`, no I/O, no packages, no reader macros, no FFI, no threads, no randomness.
+No macros, no mutation (`set!`/`setf`), no loops, no `eval`, no I/O, no packages, no reader macros, no FFI, no threads, no randomness.
 
 ## Resource Limits
 
@@ -100,6 +113,21 @@ The `evaluate` function returns two values: the result (or `NIL` on error) and a
 (let ((add5 (make-adder 5)))
   (add5 10))
 ;=> 15
+
+;; Deep equality for grading
+(define (insert x lst)
+  (cond ((null? lst) (list x))
+        ((<= x (car lst)) (cons x lst))
+        (t (cons (car lst) (insert x (cdr lst))))))
+(define (my-sort lst)
+  (if (null? lst) nil
+      (insert (car lst) (my-sort (cdr lst)))))
+(equal? (my-sort '(3 1 4 1 5 9 2 6)) '(1 1 2 3 4 5 6 9))
+;=> t
+
+;; Apply
+(apply + '(1 2 3))
+;=> 6
 ```
 
 ## Project Structure
