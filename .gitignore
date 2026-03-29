@@ -12,7 +12,6 @@
 .serena/
 .cache/
 .direnv/
-.mcp.json
 
 # Test scratch space
 tests/tmp/*
