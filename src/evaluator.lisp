@@ -42,12 +42,19 @@ Resolves all tail-calls via trampoline. Always returns a final value."
                (return result))))
     (track-depth ctx -1)))
 
+(defun check-not-boolean (context value)
+  "Signal a clear error if VALUE is t or nil (reserved, not rebindable)."
+  (when (or (eq value t) (eq value nil))
+    (error 'wardlisp-parse-error
+           :message (format nil "~a: ~a is reserved and cannot be used as a variable name"
+                            context (if (eq value t) "t" "nil")))))
+
 (defun eval-inner (expr env ctx)
   "Single-step evaluation. May return tail-call structs for closure applications.
 Use wardlisp-eval when you need a fully resolved value."
   (consume-fuel ctx)
   (cond
-    ((integerp expr) (check-integer ctx expr))
+    ((numberp expr) (check-integer ctx expr))
     ((eq expr t) t)
     ((null expr) nil)
     ((stringp expr) (env-lookup env expr))
@@ -93,7 +100,7 @@ Use wardlisp-eval when you need a fully resolved value."
   (when (> depth +max-parse-depth+)
     (error 'wardlisp-parse-error
            :message "Quoted expression nesting too deep"))
-  (cond ((null ast) nil) ((integerp ast) (check-integer ctx ast))
+  (cond ((null ast) nil) ((numberp ast) (check-integer ctx ast))
         ((eq ast t) t) ((stringp ast) ast)
         ((consp ast) (track-cons ctx)
          (make-ocons (ast-to-value (car ast) ctx (1+ depth))
@@ -123,9 +130,14 @@ Last body expression is in tail position (use eval-inner)."
       (error 'wardlisp-parse-error :message
              (format nil "let: bindings must be a list, got ~s" bindings)))
     (dolist (binding bindings)
-      (unless (and (listp binding) (= 2 (length binding)) (stringp (first binding)))
+      (unless (and (listp binding) (= 2 (length binding)))
         (error 'wardlisp-parse-error :message
-               (format nil "let: each binding must be (name expr), got ~s" binding))))
+               (format nil "let: each binding must be (name expr), got ~s" binding)))
+      (check-not-boolean "let" (first binding))
+      (unless (stringp (first binding))
+        (error 'wardlisp-parse-error :message
+               (format nil "let: binding name must be a symbol, got ~s"
+                       (first binding)))))
     ;; Evaluate all RHS in outer environment first (parallel semantics)
     (let* ((names (mapcar #'first bindings))
            (vals (mapcar (lambda (b) (wardlisp-eval (second b) env ctx)) bindings))
@@ -149,9 +161,14 @@ Last body expression is in tail position (use eval-inner)."
       (error 'wardlisp-parse-error :message
              (format nil "let*: bindings must be a list, got ~s" bindings)))
     (dolist (binding bindings)
-      (unless (and (listp binding) (= 2 (length binding)) (stringp (first binding)))
+      (unless (and (listp binding) (= 2 (length binding)))
         (error 'wardlisp-parse-error :message
                (format nil "let*: each binding must be (name expr), got ~s" binding)))
+      (check-not-boolean "let*" (first binding))
+      (unless (stringp (first binding))
+        (error 'wardlisp-parse-error :message
+               (format nil "let*: binding name must be a symbol, got ~s"
+                       (first binding))))
       (let ((val (wardlisp-eval (second binding) current-env ctx)))
         (setf current-env
                 (env-extend current-env (list (first binding)) (list val)))))
@@ -172,6 +189,7 @@ Last body expression is in tail position (use eval-inner)."
       (error 'wardlisp-parse-error :message
              (format nil "lambda: params must be a list, got ~s" params)))
     (dolist (p params)
+      (check-not-boolean "lambda" p)
       (unless (stringp p)
         (error 'wardlisp-parse-error :message
                (format nil "lambda: param must be a symbol, got ~s" p))))
@@ -199,10 +217,12 @@ Builtin bindings (first frame) are not overwritable."
        ((consp target)
         (let ((name (first target))
               (params (rest target)))
+          (check-not-boolean "define" name)
           (unless (stringp name)
             (error 'wardlisp-parse-error :message
                    (format nil "define: function name must be a symbol, got ~s" name)))
           (dolist (p params)
+            (check-not-boolean "define" p)
             (unless (stringp p)
               (error 'wardlisp-parse-error :message
                      (format nil "define: parameter must be a symbol, got ~s" p))))
@@ -227,6 +247,7 @@ Builtin bindings (first frame) are not overwritable."
           (update-or-append target value)
           value))
        (t
+        (check-not-boolean "define" target)
         (error 'wardlisp-parse-error :message
                (format nil "Invalid define target: ~s" target)))))))
 

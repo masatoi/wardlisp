@@ -148,9 +148,10 @@
                             (exec-ctx-max-cons ctx)))))
 
 (defun check-integer (ctx value)
-  "Check integer is within allowed range. Signals integer-limit-exceeded if not."
+  "Check number is within allowed range. Signals integer-limit-exceeded if not.
+Accepts both integers and floats."
   (when (> (abs value) (exec-ctx-max-integer ctx))
     (error 'wardlisp-integer-limit-exceeded
-           :message (format nil "Integer ~d exceeds limit ~d"
+           :message (format nil "Number ~a exceeds limit ~d"
                             value (exec-ctx-max-integer ctx))))
   value)

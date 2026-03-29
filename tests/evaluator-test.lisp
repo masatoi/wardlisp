@@ -85,8 +85,19 @@
   (ok (= 6 (eval1 "(* 2 3)")))
   (ok (= 1 (eval1 "(*)"))))
 
-(deftest test-builtin-div
-  (ok (= 3 (eval1 "(div 7 2)"))))
+(deftest test-builtin-quotient
+  (ok (= 3 (eval1 "(quotient 7 2)")))
+  (ok (= -3 (eval1 "(quotient -7 2)"))))
+
+(deftest test-builtin-smart-div
+  ;; Exact integer result
+  (ok (= 2 (eval1 "(/ 6 3)")))
+  (ok (integerp (eval1 "(/ 6 3)")))
+  ;; Non-exact returns float
+  (ok (typep (eval1 "(/ 7 2)") 'double-float))
+  (ok (= 3.5d0 (eval1 "(/ 7 2)")))
+  ;; Float args always return float
+  (ok (typep (eval1 "(/ 6.0 3)") 'double-float)))
 
 (deftest test-builtin-mod
   (ok (= 1 (eval1 "(mod 7 2)"))))
@@ -215,9 +226,12 @@
 (deftest test-builtin-sub-zero-args
   (ok (signals (eval1 "(-)") 'wardlisp-arity-error)))
 
-;;; --- Coverage: div/mod zero division ---
-(deftest test-builtin-div-zero
-  (ok (signals (eval1 "(div 1 0)") 'wardlisp-type-error)))
+;;; --- Coverage: quotient/div/mod zero division ---
+(deftest test-builtin-quotient-zero
+  (ok (signals (eval1 "(quotient 1 0)") 'wardlisp-type-error)))
+
+(deftest test-builtin-fdiv-zero
+  (ok (signals (eval1 "(/ 1 0)") 'wardlisp-type-error)))
 
 (deftest test-builtin-mod-zero
   (ok (signals (eval1 "(mod 1 0)") 'wardlisp-type-error)))
@@ -270,3 +284,69 @@
 (deftest test-eval-string-defaults
   ;; Call eval-string with no keyword args to exercise default parameter values
   (ok (= 3 (eval-string "(+ 1 2)"))))
+
+(deftest test-float-literals
+  (ok (= 3.14d0 (eval1 "3.14")))
+  (ok (= -0.5d0 (eval1 "-0.5")))
+  (ok (= 1000.0d0 (eval1 "1e3")))
+  (ok (= 0.5d0 (eval1 ".5")))
+  (ok (= 2.5d-10 (eval1 "2.5e-10"))))
+
+(deftest test-float-arithmetic
+  (ok (= 4.0d0 (eval1 "(+ 1.5 2.5)")))
+  (ok (= 6.0d0 (eval1 "(* 3.0 2)")))
+  (ok (= 10.0d0 (eval1 "(- 10.5 0.5)")))
+  ;; Mixed integer/float
+  (ok (= 1.5d0 (eval1 "(+ 1 0.5)")))
+  (ok (= 2.0d0 (eval1 "(* 2 1.0)"))))
+
+(deftest test-float-division
+  ;; / always returns float
+  (ok (typep (eval1 "(/ 1 3)") 'double-float))
+  (ok (< (abs (- (eval1 "(/ 22 7)") 3.142857d0)) 0.001d0))
+  ;; Division by zero
+  (ok (signals (eval1 "(/ 1 0)") 'wardlisp-type-error))
+  (ok (signals (eval1 "(/ 1.0 0)") 'wardlisp-type-error)))
+
+(deftest test-integer-predicate
+  (ok (eq t (eval1 "(integer? 42)")))
+  (ok (eq t (eval1 "(integer? -7)")))
+  (ok (eq t (eval1 "(integer? 0)")))
+  (ok (eq nil (eval1 "(integer? 3.14)")))
+  (ok (eq nil (eval1 "(integer? 'x)")))
+  (ok (eq nil (eval1 "(integer? nil)")))
+  (ok (eq nil (eval1 "(integer? t)")))
+  (ok (eq nil (eval1 "(integer? (cons 1 2))"))))
+
+(deftest test-number-predicate
+  (ok (eq t (eval1 "(number? 42)")))
+  (ok (eq t (eval1 "(number? 3.14)")))
+  (ok (eq t (eval1 "(number? -0.5)")))
+  (ok (eq nil (eval1 "(number? 'x)")))
+  (ok (eq nil (eval1 "(number? nil)")))
+  (ok (eq nil (eval1 "(number? (list 1 2))"))))
+
+(deftest test-comparison-non-number-returns-nil
+  ;; = returns nil instead of erroring for non-numbers
+  (ok (eq nil (eval1 "(= 'x 'y)")))
+  (ok (eq nil (eval1 "(= 'x 1)")))
+  (ok (eq nil (eval1 "(= nil nil)")))
+  ;; Other comparisons return nil for non-numbers
+  (ok (eq nil (eval1 "(< 'a 'b)")))
+  (ok (eq nil (eval1 "(<= t nil)")))
+  (ok (eq nil (eval1 "(> 'x 1)")))
+  (ok (eq nil (eval1 "(>= nil 0)")))
+  ;; Still works for numbers
+  (ok (eq t (eval1 "(= 1 1)")))
+  (ok (eq t (eval1 "(= 1.0 1)")))
+  (ok (eq t (eval1 "(< 1 2.0)"))))
+
+(deftest test-reserved-name-error-messages
+  ;; t and nil cannot be used as variable names
+  (ok (signals (eval1 "(let ((t 42)) t)") 'wardlisp-parse-error))
+  (ok (signals (eval1 "(let ((nil 1)) nil)") 'wardlisp-parse-error))
+  (ok (signals (eval1 "(let* ((t 1)) t)") 'wardlisp-parse-error))
+  (ok (signals (eval1 "((lambda (t) t) 1)") 'wardlisp-parse-error))
+  (ok (signals (eval1 "(define t 42)") 'wardlisp-parse-error))
+  (ok (signals (eval1 "(define (t x) x)") 'wardlisp-parse-error))
+  (ok (signals (eval1 "(define (f t) t)") 'wardlisp-parse-error)))

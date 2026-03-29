@@ -88,3 +88,15 @@
 (deftest test-read-case-normalization
   (ok (equal "hello" (wardlisp-read "HELLO")))
   (ok (equal "mixed" (wardlisp-read "MiXeD"))))
+
+(deftest test-read-float
+  (ok (= 3.14d0 (wardlisp-read "3.14")))
+  (ok (= -0.5d0 (wardlisp-read "-0.5")))
+  (ok (= 0.5d0 (wardlisp-read ".5")))
+  (ok (= 1000.0d0 (wardlisp-read "1e3")))
+  (ok (= 2.5d-10 (wardlisp-read "2.5e-10")))
+  (ok (= 100.0d0 (wardlisp-read "+100.0")))
+  ;; Float in list
+  (let ((result (wardlisp-read "(+ 1.5 2.5)")))
+    (ok (= 1.5d0 (second result)))
+    (ok (= 2.5d0 (third result)))))

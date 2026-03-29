@@ -86,26 +86,64 @@
 (defun parse-token (token)
   "Convert a token string to an AST value."
   (let ((lower (string-downcase token)))
-    (cond
-      ((string= lower "t") t)
-      ((string= lower "nil") nil)
-      ((integer-token-p token)
-       (when (> (length token) 100)
-         (error 'wardlisp-parse-error
-                :message (format nil "Integer literal too long (~d digits, max 100)"
-                                 (length token))))
-       (parse-integer token :radix 10))
-      (t lower))))
+    (cond ((string= lower "t") t)
+          ((string= lower "nil") nil)
+          ((integer-token-p token)
+           (when (> (length token) 100)
+             (error 'wardlisp-parse-error
+                    :message (format nil "Integer literal too long (~d digits, max 100)"
+                                    (length token))))
+           (parse-integer token :radix 10))
+          ((float-token-p token)
+           (when (> (length token) 100)
+             (error 'wardlisp-parse-error
+                    :message (format nil "Float literal too long (~d chars, max 100)"
+                                    (length token))))
+           (let ((*read-default-float-format* 'double-float))
+             (read-from-string token)))
+          (t lower))))
 
 (defun integer-token-p (token)
   "Check if TOKEN looks like an integer."
   (let ((start (if (and (> (length token) 1)
-                        (or (char= (char token 0) #\-)
-                            (char= (char token 0) #\+)))
+                        (or (char= (char token 0) #\-) (char= (char token 0) #\+)))
                    1
                    0)))
-    (and (> (length token) start)
-         (every #'digit-char-p (subseq token start)))))
+    (and (> (length token) start) (every #'digit-char-p (subseq token start)))))
+
+(defun float-token-p (token)
+  "Check if TOKEN looks like a floating-point number (e.g., 3.14, -0.5, .5, 1e3, 2.5e-10)."
+  (let* ((len (length token))
+         (start (if (and (> len 1)
+                         (or (char= (char token 0) #\-)
+                             (char= (char token 0) #\+)))
+                    1
+                    0)))
+    (when (= start len) (return-from float-token-p nil))
+    (let ((has-dot nil)
+          (has-e nil)
+          (has-digit nil)
+          (i start))
+      (loop while (< i len)
+            for ch = (char token i)
+            do (cond
+                 ((digit-char-p ch)
+                  (setf has-digit t)
+                  (incf i))
+                 ((and (char= ch #\.) (not has-dot) (not has-e))
+                  (setf has-dot t)
+                  (incf i))
+                 ((and (or (char= ch #\e) (char= ch #\E))
+                       (not has-e) has-digit)
+                  (setf has-e t)
+                  (setf has-digit nil)
+                  (incf i)
+                  (when (and (< i len)
+                             (or (char= (char token i) #\+)
+                                 (char= (char token i) #\-)))
+                    (incf i)))
+                 (t (return-from float-token-p nil))))
+      (and has-digit (or has-dot has-e)))))
 
 (defun atom-char-p (ch)
   "Is CH a valid atom character for wardlisp?"

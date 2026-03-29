@@ -11,8 +11,9 @@
            (cons "+" (make-builtin "+" #'builtin-add nil))
            (cons "-" (make-builtin "-" #'builtin-sub nil))
            (cons "*" (make-builtin "*" #'builtin-mul nil))
-           (cons "div" (make-builtin "div" #'builtin-div 2))
+           (cons "quotient" (make-builtin "quotient" #'builtin-quotient 2))
            (cons "mod" (make-builtin "mod" #'builtin-mod 2))
+           (cons "/" (make-builtin "/" #'builtin-fdiv 2))
            ;; Comparison (all arity 2)
            (cons "=" (make-builtin "=" #'builtin-num-eq 2))
            (cons "<" (make-builtin "<" #'builtin-lt 2))
@@ -32,6 +33,8 @@
            (cons "not" (make-builtin "not" #'builtin-not 1))
            (cons "eq?" (make-builtin "eq?" #'builtin-eq-p 2))
            (cons "equal?" (make-builtin "equal?" #'builtin-equal-p 2))
+           (cons "integer?" (make-builtin "integer?" #'builtin-integer-p 1))
+           (cons "number?" (make-builtin "number?" #'builtin-number-p 1))
            (cons "print" (make-builtin "print" #'builtin-print 1)))))
     (list builtins)))
 
@@ -43,6 +46,13 @@
     (error 'wardlisp-type-error
            :message (format nil "~a: expected integer, got ~a" name (print-value value)))))
 
+(defun ensure-number (name value)
+  "Ensure VALUE is a number (integer or float), or signal a type error."
+  (unless (numberp value)
+    (error 'wardlisp-type-error
+           :message (format nil "~a: expected number, got ~a"
+                            name (print-value value)))))
+
 (defun ensure-ocons (name value)
   "Ensure VALUE is an ocons pair, or signal a type error."
   (unless (ocons-p value)
@@ -53,28 +63,28 @@
 
 (defun builtin-add (args ctx)
   "Built-in + function. Variadic addition."
-  (dolist (a args) (ensure-integer "+" a))
+  (dolist (a args) (ensure-number "+" a))
   (check-integer ctx (reduce #'+ args :initial-value 0)))
 
 (defun builtin-sub (args ctx)
   "Built-in - function. Unary negation or variadic subtraction."
   (when (null args)
     (error 'wardlisp-arity-error :message "- requires at least 1 argument"))
-  (dolist (a args) (ensure-integer "-" a))
+  (dolist (a args) (ensure-number "-" a))
   (check-integer ctx (if (= 1 (length args))
                          (- (first args))
                          (reduce #'- args))))
 
 (defun builtin-mul (args ctx)
   "Built-in * function. Variadic multiplication."
-  (dolist (a args) (ensure-integer "*" a))
+  (dolist (a args) (ensure-number "*" a))
   (check-integer ctx (reduce #'* args :initial-value 1)))
 
-(defun builtin-div (args ctx)
-  "Built-in div function. Integer division (truncate)."
-  (dolist (a args) (ensure-integer "div" a))
+(defun builtin-quotient (args ctx)
+  "Built-in quotient function. Integer division (truncate toward zero)."
+  (dolist (a args) (ensure-integer "quotient" a))
   (when (zerop (second args))
-    (error 'wardlisp-type-error :message "div: division by zero"))
+    (error 'wardlisp-type-error :message "quotient: division by zero"))
   (check-integer ctx (truncate (first args) (second args))))
 
 (defun builtin-mod (args ctx)
@@ -85,37 +95,66 @@
     (error 'wardlisp-type-error :message "mod: division by zero"))
   (rem (first args) (second args)))
 
+(defun builtin-fdiv (args ctx)
+  "Built-in / function. Returns integer when both args are integers and
+divisible, otherwise returns float."
+  (dolist (a args) (ensure-number "/" a))
+  (when (zerop (second args))
+    (error 'wardlisp-type-error :message "/: division by zero"))
+  (let ((a (first args)) (b (second args)))
+    (if (and (integerp a) (integerp b) (zerop (rem a b)))
+        (check-integer ctx (cl:/ a b))
+        (check-integer ctx
+                       (coerce (cl:/ (coerce a 'double-float)
+                                     (coerce b 'double-float))
+                               'double-float)))))
+
 ;;; --- Comparison ---
 
 (defun builtin-num-eq (args ctx)
-  "Built-in = function. Numeric equality."
+  "Built-in = function. Numeric equality.
+Returns nil if either argument is not a number."
   (declare (ignore ctx))
-  (dolist (a args) (ensure-integer "=" a))
-  (if (cl:= (first args) (second args)) t nil))
+  (let ((a (first args)) (b (second args)))
+    (if (and (numberp a) (numberp b) (cl:= a b)) t nil)))
 
 (defun builtin-lt (args ctx)
-  "Built-in < function. Numeric less-than."
+  "Built-in < function. Numeric less-than.
+Returns nil if either argument is not a number."
   (declare (ignore ctx))
-  (dolist (a args) (ensure-integer "<" a))
-  (if (cl:< (first args) (second args)) t nil))
+  (let ((a (first args)) (b (second args)))
+    (if (and (numberp a) (numberp b) (cl:< a b)) t nil)))
 
 (defun builtin-le (args ctx)
-  "Built-in <= function. Numeric less-than-or-equal."
+  "Built-in <= function. Numeric less-than-or-equal.
+Returns nil if either argument is not a number."
   (declare (ignore ctx))
-  (dolist (a args) (ensure-integer "<=" a))
-  (if (cl:<= (first args) (second args)) t nil))
+  (let ((a (first args)) (b (second args)))
+    (if (and (numberp a) (numberp b) (cl:<= a b)) t nil)))
 
 (defun builtin-gt (args ctx)
-  "Built-in > function. Numeric greater-than."
+  "Built-in > function. Numeric greater-than.
+Returns nil if either argument is not a number."
   (declare (ignore ctx))
-  (dolist (a args) (ensure-integer ">" a))
-  (if (cl:> (first args) (second args)) t nil))
+  (let ((a (first args)) (b (second args)))
+    (if (and (numberp a) (numberp b) (cl:> a b)) t nil)))
 
 (defun builtin-ge (args ctx)
-  "Built-in >= function. Numeric greater-than-or-equal."
+  "Built-in >= function. Numeric greater-than-or-equal.
+Returns nil if either argument is not a number."
   (declare (ignore ctx))
-  (dolist (a args) (ensure-integer ">=" a))
-  (if (cl:>= (first args) (second args)) t nil))
+  (let ((a (first args)) (b (second args)))
+    (if (and (numberp a) (numberp b) (cl:>= a b)) t nil)))
+
+(defun builtin-integer-p (args ctx)
+  "Built-in integer? predicate. Returns t if argument is an integer."
+  (declare (ignore ctx))
+  (if (integerp (first args)) t nil))
+
+(defun builtin-number-p (args ctx)
+  "Built-in number? predicate. Returns t if argument is a number (integer or float)."
+  (declare (ignore ctx))
+  (if (numberp (first args)) t nil))
 
 ;;; --- List operations ---
 
@@ -216,11 +255,11 @@
   "Built-in eq? function. Structural equality."
   (declare (ignore ctx))
   (let ((a (first args)) (b (second args)))
-    (if (cond
-          ((and (integerp a) (integerp b)) (cl:= a b))
-          ((and (stringp a) (stringp b)) (string= a b))
-          (t (eql a b)))
-        t nil)))
+    (if (cond ((and (numberp a) (numberp b)) (cl:= a b))
+              ((and (stringp a) (stringp b)) (string= a b))
+              (t (eql a b)))
+        t
+        nil)))
 
 (defun builtin-equal-p (args ctx)
   "Built-in equal? function. Deep structural equality."
@@ -230,10 +269,10 @@
 (defun wardlisp-equal (a b depth)
   "Recursive structural comparison with depth limit."
   (when (> depth 10000)
-    (error 'wardlisp-recursion-limit-exceeded :message
-           "equal?: comparison too deep"))
+    (error 'wardlisp-recursion-limit-exceeded
+           :message "equal?: comparison too deep"))
   (cond ((eql a b) t)
-        ((and (integerp a) (integerp b)) (= a b))
+        ((and (numberp a) (numberp b)) (cl:= a b))
         ((and (stringp a) (stringp b)) (string= a b))
         ((and (ocons-p a) (ocons-p b))
          (and (wardlisp-equal (ocons-ocar a) (ocons-ocar b) (1+ depth))
@@ -254,13 +293,27 @@
 
 ;;; --- Value printing ---
 
+(defun format-float (value)
+  "Format a float for wardlisp output. Removes trailing zeros but keeps at least one decimal."
+  (let ((s (format nil "~f" value)))
+    (let ((dot-pos (position #\. s)))
+      (if dot-pos
+          (let ((end (length s)))
+            (loop while (and (> end (+ dot-pos 2))
+                             (char= (char s (1- end)) #\0))
+                  do (decf end))
+            (subseq s 0 end))
+          s))))
+
 (defun print-value (value &optional (depth 0))
   "Convert a runtime value to its string representation.
 Limits nesting depth to prevent host stack overflow."
   (if (> depth 100)
       "..."
       (cond ((null value) "nil") ((eq value t) "t")
-            ((integerp value) (format nil "~d" value)) ((stringp value) value)
+            ((integerp value) (format nil "~d" value))
+            ((floatp value) (format-float value))
+            ((stringp value) value)
             ((ocons-p value) (print-ocons value (1+ depth)))
             ((closure-p value)
              (format nil "#<closure~@[ ~a~]>" (closure-name value)))
