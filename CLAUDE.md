@@ -1,72 +1,73 @@
-# CLAUDE.md
+# WardLisp
+
+Restricted Lisp dialect for educational games — sandboxed evaluator with resource limits.
 
 ## Agent Guidelines
 
 @prompts/repl-driven-development.md
-@agents/common-lisp-expert.md
+@prompts/common-lisp-expert.md
 
-## Project Overview
+## Quick Reference
 
-wardlisp is a restricted Lisp dialect.
-
-## Self-Hosted Development
-
-This project is developed using its own MCP tools. When working on wardlisp:
-
-- **Lisp code operations** (search, read, edit, eval): Use cl-mcp tools (`clgrep-search`, `lisp-read-file`, `lisp-edit-form`, `repl-eval`, etc.) per repl-driven-development.md
-- **Shell commands**: Only for `git`, `mallet` (linting), `rove` (test fallback), and user-requested commands
-- **Package naming**: Uses ASDF `package-inferred-system` — each file defines package `wardlisp/src/<name>`. Add new files by updating `wardlisp.asd` dependencies. Exports go in `main.lisp`
-
-## Testing & Linting
-
-**Run tests** via `run-tests` tool with system name `wardlisp/tests/<name>-test`:
 ```lisp
-;; Single test via repl-eval (fallback when package conflicts occur)
-(rove:run-test 'wardlisp/tests/integration-test::repl-eval-printlength)
-```
+;; Run tests (via cl-mcp)
+run-tests(system: "wardlisp/tests")
 
-**Fallback** (stale image / package conflicts): `rove wardlisp.asd` from Bash for a clean process.
+;; Single test
+run-tests(system: "wardlisp/tests", test: "wardlisp/tests/evaluator-test::test-name")
 
-**Pre-PR**: `(asdf:compile-system :wardlisp :force t)` to catch warnings, then run full test suite.
-
-**Linting** (required before commit):
-```bash
+;; Lint (before commit)
 mallet src/*.lisp
 ```
 
+## Tech Stack
+
+- **Language**: Common Lisp (SBCL)
+- **Build**: ASDF — single `wardlisp` system (not package-inferred)
+- **Testing**: Rove
+
+## Self-Hosted Development
+
+All Lisp operations go through cl-mcp tools as defined in `repl-driven-development.md`. This applies to **Claude Code's built-in tools as well** — do not use Read, Edit, Write, Grep, or Glob for `.lisp` / `.asd` files. Use `clgrep-search`, `lisp-read-file`, `lisp-edit-form`, `lisp-patch-form`, `repl-eval`, `load-system`, `run-tests` instead.
+
+**Allowed shell commands**: `git`, `gh`, `mallet`, and user-requested commands only.
+
+**First-time setup**: Call `fs-set-project-root` with `{"path": "."}` before file operations.
+
+## Common Mistakes
+
+- **Forgetting `load-system`**: `lisp-edit-form` writes to disk only — the worker needs `load-system` to see changes.
+- **`lisp-patch-form` whitespace**: `old_text` must match exactly. Use `lisp-read-file collapsed=false` to see exact text first.
+- **Test fallback**: When package conflicts occur, use `rove wardlisp.asd` from Bash for a clean process.
+
 ## Architecture
 
-**Protocol** (`src/protocol.lisp`): JSON-RPC 2.0, MCP handshake (2025-06-18, 2025-03-26, 2024-11-05), tools dispatch
-**Transports** (`src/tcp.lisp`, `src/http.lisp`, `src/run.lisp`): Stdio, TCP (multi-threaded), HTTP (Streamable HTTP via Hunchentoot)
-**Tools:**
+```
+src/
+  types.lisp      — Data types: closure, tail-call, ocons, builtin, exec-ctx, conditions
+  reader.lisp     — S-expression parser (sandboxed: no #, no :)
+  env.lisp        — Lexical environment (extend, lookup, set!)
+  builtins.lisp   — Built-in functions (+, -, *, /, cons, car, etc.)
+  evaluator.lisp  — Core evaluator with TCO trampoline, local define (letrec*)
+  main.lisp       — Public API: evaluate function with metrics
 
-| Category | Files | Purpose |
-|----------|-------|---------|
-| REPL | `src/repl.lisp` | Form evaluation with package context, print controls, timeout |
-| System Loader | `src/system-loader.lisp` | ASDF loading with force-reload, output suppression |
-| File System | `src/fs.lisp` | Read/write/list with project root guardrails |
-| Lisp Reading | `src/lisp-read-file.lisp` | Collapsed signatures, pattern-based expansion |
-| Lisp Editing | `src/lisp-edit-form.lisp` | CST-based form replace/insert via Eclector |
-| Lisp Patching | `src/lisp-patch-form.lisp` | Token-efficient sub-form text replacement |
-| Code Intel | `src/code.lisp` | Symbol lookup, describe, xref via sb-introspect |
-| Validation | `src/validate.lisp`, `src/parinfer.lisp` | Paren checking, auto-repair |
-| Pool Mgmt | `src/tools/pool-status.lisp`, `src/tools/pool-kill-worker.lisp` | Worker diagnostics and lifecycle |
+tests/             Rove test suites (mirrored naming: *-test.lisp)
+docs/              Language specification
+prompts/           System prompts for AI agents
+```
+
+### Key Design Decisions
+
+- **Sandbox**: String-based symbols, custom `ocons` type, reader blocks `#` and `:`
+- **TCO**: Trampoline via `tail-call` structs with `:expr`/`:body` kinds
+- **Local define**: Scheme-style letrec* in body head position (lambda, define, let, let*)
+- **Resource limits**: fuel, max-depth, max-cons, max-output, max-integer, timeout
+- **Builtin protection**: First env frame is builtins, `top-level-update-or-append` skips it
 
 ## Code Style
 
-- Follow Google Common Lisp Style Guide
-- 2-space indent, <=100 columns
-- Blank line between top-level forms
+- Google Common Lisp Style Guide
+- 2-space indent, <=100 columns, blank line between top-level forms
 - Lower-case lisp-case: `my-function`, `*special*`, `+constant+`, `something-p`
-- Docstrings required for public functions/classes
+- Docstrings required for public functions
 - Each file starts with `(in-package ...)`
-
-## Repository Structure
-
-```
-src/          Core implementation (protocol, tools, transports)
-tests/        Rove test suites (mirrored naming: *-test.lisp)
-scripts/      Helper clients and stdio<->TCP bridge
-prompts/      System prompts for AI agents (repl-driven-development.md)
-agents/       Agent persona guidelines (common-lisp-expert.md)
-```
