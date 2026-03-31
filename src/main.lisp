@@ -68,9 +68,7 @@ success from failure."
         (sb-ext:with-timeout timeout
           (let* ((program (wardlisp/src/reader:wardlisp-read-program code))
                  (env (make-initial-env))
-                 (result (let ((r nil))
-                           (dolist (expr program r)
-                             (setf r (wardlisp-eval expr env ctx))))))
+                 (result (eval-program program env ctx)))
             (values result (make-metrics ctx))))
       (wardlisp-error (e)
         (values nil

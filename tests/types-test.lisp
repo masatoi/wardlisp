@@ -65,6 +65,12 @@
     (ok (equal '("+" "x" 1) (closure-body c)))
     (ok (null (closure-env c)))))
 
+(deftest test-tail-call-kind
+  (let ((tc (make-tail-call :expr '(1 2 3) :env '((("x" . 1))) :kind :body)))
+    (ok (tail-call-p tc))
+    (ok (equal '(1 2 3) (tail-call-expr tc)))
+    (ok (eq :body (tail-call-kind tc)))))
+
 ;;; --- Coverage: exec-ctx custom params ---
 (deftest test-exec-ctx-custom
   (let ((ctx (make-exec-ctx :fuel 50 :max-depth 5 :max-cons 10
