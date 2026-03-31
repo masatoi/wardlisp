@@ -395,3 +395,9 @@
   (ok (signals (eval1 "(define t 42)") 'wardlisp-parse-error))
   (ok (signals (eval1 "(define (t x) x)") 'wardlisp-parse-error))
   (ok (signals (eval1 "(define (f t) t)") 'wardlisp-parse-error)))
+
+(deftest test-reserved-name-in-local-define
+  "t and nil cannot be used as local define names"
+  (ok (signals (eval1 "(let () (define t 1) t)") 'wardlisp-parse-error))
+  (ok (signals (eval1 "(let () (define nil 1) nil)") 'wardlisp-parse-error))
+  (ok (signals (eval1 "((lambda () (define t 1) t))") 'wardlisp-parse-error)))

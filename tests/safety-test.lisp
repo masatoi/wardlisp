@@ -45,6 +45,12 @@
        (eval-safe "(* 999999 999999)" :max-integer 1000000)
        'wardlisp-integer-limit-exceeded)))
 
+(deftest test-huge-float-stops
+  "Float exceeding max-integer triggers integer-limit-exceeded"
+  (ok (signals
+       (eval-safe "(* 999999.0 999999.0)" :max-integer 1000000)
+       'wardlisp-integer-limit-exceeded)))
+
 ;; --- Output limit ---
 (deftest test-output-limit
   (ok (signals
@@ -156,3 +162,12 @@
 
 (deftest test-builtin-shadowed-by-let-is-safe
   (ok (signals (eval-safe "(let ((+ 42)) (+ 1 2))") 'wardlisp-type-error)))
+
+(deftest test-timeout-exceeded
+  "Infinite loop triggers timeout-exceeded error"
+  (multiple-value-bind (result metrics)
+      (wardlisp:evaluate "(define (loop) (loop)) (loop)"
+                         :timeout 0.1 :fuel 100000000)
+    (declare (ignore result))
+    (ok (eq 'wardlisp/src/types:wardlisp-timeout-exceeded
+            (getf metrics :error-type)))))

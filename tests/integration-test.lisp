@@ -252,3 +252,122 @@
 (deftest test-apply-closure
   (let ((result (evaluate "(apply (lambda (x y) (+ x y)) '(3 4))")))
     (ok (= 7 result))))
+
+(deftest test-apply-improper-list
+  "apply with dotted pair signals type-error"
+  (multiple-value-bind (result metrics)
+      (evaluate "(apply + '(1 . 2))")
+    (declare (ignore result))
+    (ok (eq 'wardlisp-type-error (getf metrics :error-type)))))
+
+(deftest test-apply-non-list
+  "apply with non-list arg signals type-error"
+  (multiple-value-bind (result metrics)
+      (evaluate "(apply + 42)")
+    (declare (ignore result))
+    (ok (eq 'wardlisp-type-error (getf metrics :error-type)))))
+
+(deftest test-apply-arity-error
+  "apply with wrong arg count signals arity-error"
+  (multiple-value-bind (result metrics)
+      (evaluate "(apply cons '(1))")
+    (declare (ignore result))
+    (ok (eq 'wardlisp-arity-error (getf metrics :error-type)))))
+
+(deftest test-append-zero-args
+  "(append) returns nil"
+  (let ((result (evaluate "(append)")))
+    (ok (null result))))
+
+(deftest test-append-one-arg
+  "(append '(1 2)) returns the list as-is"
+  (let ((result (evaluate "(equal? (append '(1 2)) '(1 2))" :max-cons 100)))
+    (ok (eq t result))))
+
+(deftest test-append-last-arg-non-list
+  "(append '(1) 2) creates dotted pair"
+  (let ((result (evaluate "(equal? (cdr (append '(1) 2)) 2)" :max-cons 100)))
+    (ok (eq t result))))
+
+(deftest test-append-improper-prefix
+  "append with improper list as non-last arg signals type-error"
+  (multiple-value-bind (result metrics)
+      (evaluate "(append (cons 1 2) '(3))" :max-cons 100)
+    (declare (ignore result))
+    (ok (eq 'wardlisp-type-error (getf metrics :error-type)))))
+
+(deftest test-mod-negative-dividend
+  "(mod -7 2) => -1 (same sign as dividend)"
+  (let ((result (evaluate "(mod -7 2)")))
+    (ok (= -1 result))))
+
+(deftest test-mod-negative-divisor
+  "(mod 7 -2) => 1 (same sign as dividend)"
+  (let ((result (evaluate "(mod 7 -2)")))
+    (ok (= 1 result))))
+
+(deftest test-mod-both-negative
+  "(mod -7 -2) => -1 (same sign as dividend)"
+  (let ((result (evaluate "(mod -7 -2)")))
+    (ok (= -1 result))))
+
+(deftest test-quotient-negative-divisor
+  "(quotient 7 -2) => -3, (quotient -7 -2) => 3 (truncation toward zero)"
+  (let ((r1 (evaluate "(quotient 7 -2)"))
+        (r2 (evaluate "(quotient -7 -2)")))
+    (ok (= -3 r1))
+    (ok (= 3 r2))))
+
+(deftest test-length-improper-list
+  "(length (cons 1 2)) signals type-error"
+  (multiple-value-bind (result metrics)
+      (evaluate "(length (cons 1 2))")
+    (declare (ignore result))
+    (ok (eq 'wardlisp-type-error (getf metrics :error-type)))))
+
+(deftest test-float-display-format
+  "Float display: trailing zeros removed, at least one decimal digit kept"
+  (multiple-value-bind (result metrics)
+      (evaluate "(begin (print 1000.0) (print 3.14) (print 2.0))")
+    (declare (ignore result))
+    (let ((output (getf metrics :output)))
+      (ok (search "1000.0" output))
+      (ok (search "3.14" output))
+      (ok (search "2.0" output)))))
+
+(deftest test-evaluate-invalid-params
+  "evaluate rejects invalid keyword parameters"
+  ;; negative fuel
+  (multiple-value-bind (result metrics)
+      (evaluate "(+ 1 2)" :fuel -1)
+    (declare (ignore result))
+    (ok (eq 'wardlisp-type-error (getf metrics :error-type))))
+  ;; zero timeout
+  (multiple-value-bind (result metrics)
+      (evaluate "(+ 1 2)" :timeout 0)
+    (declare (ignore result))
+    (ok (eq 'wardlisp-type-error (getf metrics :error-type))))
+  ;; non-integer max-depth
+  (multiple-value-bind (result metrics)
+      (evaluate "(+ 1 2)" :max-depth 3.5)
+    (declare (ignore result))
+    (ok (eq 'wardlisp-type-error (getf metrics :error-type))))
+  ;; non-string code
+  (multiple-value-bind (result metrics)
+      (evaluate 42)
+    (declare (ignore result))
+    (ok (eq 'wardlisp-type-error (getf metrics :error-type)))))
+
+(deftest test-define-in-and-rejected
+  "define inside and signals parse-error"
+  (multiple-value-bind (result metrics)
+      (evaluate "(and (define x 1) x)")
+    (declare (ignore result))
+    (ok (eq 'wardlisp-parse-error (getf metrics :error-type)))))
+
+(deftest test-define-in-or-rejected
+  "define inside or signals parse-error"
+  (multiple-value-bind (result metrics)
+      (evaluate "(or (define x 1) x)")
+    (declare (ignore result))
+    (ok (eq 'wardlisp-parse-error (getf metrics :error-type)))))
