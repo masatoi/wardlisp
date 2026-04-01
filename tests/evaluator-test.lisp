@@ -87,8 +87,9 @@
   ;; Top-level define still works
   (ok (= 10 (eval1 "(define x 10) x")))
   (ok (= 6 (eval1 "(define (f a b c) (+ a (+ b c))) (f 1 2 3)")))
-  ;; Builtin protection: top-level shadowing does not break builtins
-  (ok (= 3 (eval1 "(define + 42) (+ 1 2)")))
+  ;; Top-level define shadows builtins (spec section 8.4)
+  (ok (= 42 (eval1 "(define + 42) +")))
+  (ok (signals (eval1 "(define + 42) (+ 1 2)") 'wardlisp-type-error))
   ;; TCO still works with multi-body closures
   (ok (= 20 (eval1 "(define (loop n) (if (= n 20) n (loop (+ n 1)))) (loop 0)")))
   ;; let / let* binding rules unchanged

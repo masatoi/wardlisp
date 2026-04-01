@@ -157,8 +157,9 @@
   (ok (signals (eval-safe "(intern x)") 'wardlisp-name-error)))
 
 ;; --- Builtin integrity ---
-(deftest test-builtin-not-overwritable-by-define
-  (ok (eql 3 (eval-safe "(define + 42) (+ 1 2)" :fuel 1000))))
+(deftest test-builtin-shadowed-by-define
+  (ok (eql 42 (eval-safe "(define + 42) +" :fuel 1000)))
+  (ok (signals (eval-safe "(define + 42) (+ 1 2)" :fuel 1000) 'wardlisp-type-error)))
 
 (deftest test-builtin-shadowed-by-let-is-safe
   (ok (signals (eval-safe "(let ((+ 42)) (+ 1 2))") 'wardlisp-type-error)))

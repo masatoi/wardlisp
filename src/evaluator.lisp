@@ -202,6 +202,12 @@ Then/else branches are in tail position (use eval-inner)."
       (unless (stringp p)
         (error 'wardlisp-parse-error :message
                (format nil "lambda: param must be a symbol, got ~s" p))))
+    (let ((seen nil))
+      (dolist (p params)
+        (when (member p seen :test #'string=)
+          (error 'wardlisp-parse-error :message
+                 (format nil "lambda: duplicate parameter name: ~a" p)))
+        (push p seen)))
     (make-closure params body env)))
 
 (defun validate-define-target (target context)
@@ -221,6 +227,12 @@ Then/else branches are in tail position (use eval-inner)."
            (error 'wardlisp-parse-error :message
                   (format nil "~a: parameter must be a symbol, got ~s"
                           context p))))
+       (let ((seen nil))
+         (dolist (p params)
+           (when (member p seen :test #'string=)
+             (error 'wardlisp-parse-error :message
+                    (format nil "~a: duplicate parameter name: ~a" context p)))
+           (push p seen)))
        name))
     ((stringp target)
      (check-not-boolean context target)
@@ -231,17 +243,20 @@ Then/else branches are in tail position (use eval-inner)."
             (format nil "Invalid define target: ~s" target)))))
 
 (defun top-level-update-or-append (env name value)
-  "Update an existing user binding or append a new top-level frame."
-  (loop for frame in (rest env)
-        do (let ((pair (assoc name frame :test #'string=)))
-             (when pair
-               (setf (cdr pair) value)
-               (return-from top-level-update-or-append value))))
-  (nconc env (list (list (cons name value))))
+  "Update an existing user binding or add to the user frame.
+The first frame is the user frame; the rest are builtins (protected)."
+  (let ((user-frame (first env)))
+    (let ((pair (assoc name user-frame :test #'string=)))
+      (if pair
+          (setf (cdr pair) value)
+          (setf (first env) (cons (cons name value) user-frame)))))
   value)
 
 (defun eval-top-level-define (args env ctx)
   "Handle top-level define forms."
+  (when (null args)
+    (error 'wardlisp-arity-error :message
+           "define: expected (define name value) or (define (name params...) body)"))
   (let ((target (first args)))
     (cond
       ((consp target)

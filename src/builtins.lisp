@@ -36,7 +36,7 @@
            (cons "integer?" (make-builtin "integer?" #'builtin-integer-p 1))
            (cons "number?" (make-builtin "number?" #'builtin-number-p 1))
            (cons "print" (make-builtin "print" #'builtin-print 1)))))
-    (list builtins)))
+    (list nil builtins)))
 
 ;;; --- Helpers ---
 
@@ -267,17 +267,22 @@ Returns nil if either argument is not a number."
   (if (wardlisp-equal (first args) (second args) 0) t nil))
 
 (defun wardlisp-equal (a b depth)
-  "Recursive structural comparison with depth limit."
-  (when (> depth 10000)
-    (error 'wardlisp-recursion-limit-exceeded
-           :message "equal?: comparison too deep"))
-  (cond ((eql a b) t)
-        ((and (numberp a) (numberp b)) (cl:= a b))
-        ((and (stringp a) (stringp b)) (string= a b))
-        ((and (ocons-p a) (ocons-p b))
-         (and (wardlisp-equal (ocons-ocar a) (ocons-ocar b) (1+ depth))
-              (wardlisp-equal (ocons-ocdr a) (ocons-ocdr b) (1+ depth))))
-        (t nil)))
+  "Structural comparison: iterates cdr-spine, recurses car-branches."
+  (loop
+    (when (> depth 10000)
+      (error 'wardlisp-recursion-limit-exceeded :message
+             "equal?: comparison too deep"))
+    (cond
+      ((eql a b) (return t))
+      ((and (numberp a) (numberp b)) (return (= a b)))
+      ((and (stringp a) (stringp b)) (return (string= a b)))
+      ((and (ocons-p a) (ocons-p b))
+       (unless (wardlisp-equal (ocons-ocar a) (ocons-ocar b) (1+ depth))
+         (return nil))
+       (setf a (ocons-ocdr a))
+       (setf b (ocons-ocdr b))
+       (incf depth))
+      (t (return nil)))))
 
 (defun builtin-print (args ctx)
   "Built-in print function. Append string representation to output buffer."
