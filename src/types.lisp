@@ -8,7 +8,7 @@
    #:closure-params #:closure-body #:closure-env #:closure-name
    ;; Tail call (trampoline)
    #:tail-call #:make-tail-call #:tail-call-p
-   #:tail-call-expr #:tail-call-env
+   #:tail-call-expr #:tail-call-env #:tail-call-kind
    ;; Builtin
    #:builtin #:make-builtin #:builtin-p
    #:builtin-name #:builtin-func #:builtin-arity
@@ -33,6 +33,7 @@
    #:wardlisp-output-limit-exceeded
    #:wardlisp-timeout-exceeded
    #:wardlisp-internal-error
+   #:+uninitialized-binding+
    ;; Helpers
    #:consume-fuel #:track-depth #:track-expr-depth #:track-cons #:check-integer))
 (in-package :wardlisp/src/types)
@@ -46,6 +47,9 @@
 
 ;;; --- Closure ---
 
+(defvar +uninitialized-binding+ (gensym "UNINITIALIZED-BINDING-")
+  "Sentinel value for local bindings that are in scope but not initialized yet.")
+
 (defstruct (closure (:constructor make-closure (params body env &optional name)))
   "A user-defined function closure."
   (params nil :type list)
@@ -53,10 +57,11 @@
   env
   (name nil))
 
-(defstruct (tail-call (:constructor make-tail-call (&key expr env)))
+(defstruct (tail-call (:constructor make-tail-call (&key expr env (kind :expr))))
   "Represents a pending tail call for trampoline evaluation."
   expr
-  env)
+  env
+  (kind :expr))
 
 ;;; --- Builtin function ---
 

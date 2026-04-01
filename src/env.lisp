@@ -12,7 +12,12 @@
   "Look up NAME in ENV. Signals wardlisp-name-error if not found."
   (loop for frame in env
         do (let ((pair (assoc name frame :test #'string=)))
-             (when pair (return-from env-lookup (cdr pair)))))
+             (when pair
+               (let ((value (cdr pair)))
+                 (when (eq value +uninitialized-binding+)
+                   (error 'wardlisp-name-error
+                          :message (format nil "Uninitialized local binding: ~a" name)))
+                 (return-from env-lookup value)))))
   (error 'wardlisp-name-error
          :message (format nil "Undefined variable: ~a" name)))
 

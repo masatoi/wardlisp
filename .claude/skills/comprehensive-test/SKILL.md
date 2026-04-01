@@ -1,6 +1,7 @@
 ---
 description: Test a Common Lisp product from multiple perspectives using parallel agents with cl-mcp tools. Each agent adopts a different role (user, security, maintainability, etc.) to find issues that single-perspective testing misses. Use for pre-release validation or quality audits.
 allowed-tools: Task, Read, Write, Edit, Glob, Grep, Bash, AskUserQuestion, mcp__cl-mcp__repl-eval, mcp__cl-mcp__load-system, mcp__cl-mcp__run-tests, mcp__cl-mcp__clgrep-search, mcp__cl-mcp__lisp-read-file, mcp__cl-mcp__code-find, mcp__cl-mcp__code-describe, mcp__cl-mcp__code-find-references, mcp__cl-mcp__clhs-lookup, mcp__cl-mcp__lisp-check-parens, mcp__cl-mcp__inspect-object, mcp__cl-mcp__fs-list-directory
+model: claude-sonnet-4-6
 ---
 
 # Comprehensive Test (Common Lisp / cl-mcp)

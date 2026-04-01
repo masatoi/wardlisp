@@ -100,3 +100,20 @@
   (let ((result (wardlisp-read "(+ 1.5 2.5)")))
     (ok (= 1.5d0 (second result)))
     (ok (= 2.5d0 (third result)))))
+
+(deftest test-numeric-literal-100-char-boundary
+  "100-char integer is ok, 101-char integer is parse-error"
+  ;; 100 digits (exactly at limit) — should succeed
+  (let ((token-100 (make-string 100 :initial-element #\1)))
+    (ok (integerp (wardlisp-read token-100))))
+  ;; 101 digits — should fail
+  (let ((token-101 (make-string 101 :initial-element #\1)))
+    (ok (signals (wardlisp-read token-101)
+         'wardlisp-parse-error)))
+  ;; 100-char float is ok
+  (let ((token-100f (concatenate 'string (make-string 98 :initial-element #\1) ".0")))
+    (ok (numberp (wardlisp-read token-100f))))
+  ;; 101-char float is parse-error
+  (let ((token-101f (concatenate 'string (make-string 99 :initial-element #\1) ".0")))
+    (ok (signals (wardlisp-read token-101f)
+         'wardlisp-parse-error))))

@@ -99,7 +99,8 @@
              (error 'wardlisp-parse-error
                     :message (format nil "Float literal too long (~d chars, max 100)"
                                     (length token))))
-           (let ((*read-default-float-format* 'double-float))
+           (let ((*read-default-float-format* 'double-float)
+                   (*read-eval* nil))
              (read-from-string token)))
           (t lower))))
 

@@ -50,6 +50,52 @@
   (ok (= 6 (eval1 "(define (double x) (+ x x)) (double 3)")))
   (ok (= 120 (eval1 "(define (fact n) (if (= n 0) 1 (* n (fact (- n 1))))) (fact 5)"))))
 
+(deftest test-internal-define-scheme-semantics
+  ;; Simple local define
+  (ok (= 1 (eval1 "(let () (define x 1) x)")))
+  ;; Local define with outer binding
+  (ok (= 5 (eval1 "(let ((x 2)) (define y 3) (+ x y))")))
+  ;; Forward reference in sequential init (letrec*)
+  (ok (= 2 (eval1 "(let () (define x 1) (define y (+ x 1)) y)")))
+  ;; Local define shadows outer, does not leak
+  (ok (= 1 (eval1 "(define x 1) (let ((x 2)) (define x 3) x) x")))
+  ;; Builtin shadowing in local scope
+  (ok (= 42 (eval1 "(let () (define + 42) +)")))
+  ;; Local define closure captures local env
+  (ok (= 7 (eval1 "(let ((y 5)) (define f (lambda (x) (+ x y))) (f 2))")))
+  ;; Uninitialized forward reference is name-error
+  (ok (signals (eval1 "(let () (define y (+ x 1)) (define x 1) y)")
+               'wardlisp-name-error))
+  ;; Mutual recursion via letrec* semantics
+  (ok (eq t (eval1 "((lambda ()
+                        (define (even? n)
+                          (if (= n 0) t (odd? (- n 1))))
+                        (define (odd? n)
+                          (if (= n 0) nil (even? (- n 1))))
+                        (even? 10)))"))))
+
+(deftest test-internal-define-placement-rules
+  (ok (signals (eval1 "(let () 1 (define x 2) x)") 'wardlisp-parse-error))
+  (ok (signals (eval1 "(let () (define x 1))") 'wardlisp-parse-error))
+  (ok (signals (eval1 "(begin (define x 1) x)") 'wardlisp-parse-error))
+  (ok (signals (eval1 "(cond (t (define x 1) x))") 'wardlisp-parse-error))
+  (ok (signals (eval1 "((lambda () (define x 1) (define x 2) x))")
+               'wardlisp-parse-error)))
+
+;; --- Regression: top-level define, TCO, builtin protection ---
+(deftest test-internal-define-regression
+  ;; Top-level define still works
+  (ok (= 10 (eval1 "(define x 10) x")))
+  (ok (= 6 (eval1 "(define (f a b c) (+ a (+ b c))) (f 1 2 3)")))
+  ;; Top-level define shadows builtins (spec section 8.4)
+  (ok (= 42 (eval1 "(define + 42) +")))
+  (ok (signals (eval1 "(define + 42) (+ 1 2)") 'wardlisp-type-error))
+  ;; TCO still works with multi-body closures
+  (ok (= 20 (eval1 "(define (loop n) (if (= n 20) n (loop (+ n 1)))) (loop 0)")))
+  ;; let / let* binding rules unchanged
+  (ok (= 3 (eval1 "(let ((x 1) (y 2)) (+ x y))")))
+  (ok (= 3 (eval1 "(let* ((x 1) (y (+ x 1))) (+ x y))"))))
+
 ;; --- Cond ---
 (deftest test-eval-cond
   (ok (= 2 (eval1 "(cond (nil 1) (t 2))")))
@@ -350,3 +396,9 @@
   (ok (signals (eval1 "(define t 42)") 'wardlisp-parse-error))
   (ok (signals (eval1 "(define (t x) x)") 'wardlisp-parse-error))
   (ok (signals (eval1 "(define (f t) t)") 'wardlisp-parse-error)))
+
+(deftest test-reserved-name-in-local-define
+  "t and nil cannot be used as local define names"
+  (ok (signals (eval1 "(let () (define t 1) t)") 'wardlisp-parse-error))
+  (ok (signals (eval1 "(let () (define nil 1) nil)") 'wardlisp-parse-error))
+  (ok (signals (eval1 "((lambda () (define t 1) t))") 'wardlisp-parse-error)))
