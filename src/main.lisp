@@ -15,7 +15,7 @@
            #:wardlisp-timeout-exceeded))
 (in-package :wardlisp)
 
-(defun evaluate (code &key (fuel 10000) (max-depth 100) (max-cons 10000)
+(defun evaluate (code &key (fuel 1000000) (max-depth 100) (max-cons 10000)
                       (max-output 1000) (max-integer (expt 2 64)) (timeout 5))
   "Evaluate CODE string in the restricted Lisp.
 Returns (values result metrics-plist).

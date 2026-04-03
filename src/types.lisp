@@ -74,7 +74,7 @@
 ;;; --- Execution context ---
 
 (defstruct (exec-ctx (:constructor make-exec-ctx
-                         (&key (fuel 10000) (max-depth 100)
+                         (&key (fuel 1000000) (max-depth 100)
                                (max-cons 10000) (max-output 1000)
                                (max-integer (expt 2 64))
                                (max-expr-depth 1000))))

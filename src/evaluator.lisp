@@ -7,7 +7,7 @@
   (:export #:wardlisp-eval #:eval-string #:eval-program))
 (in-package :wardlisp/src/evaluator)
 
-(defun eval-string (input &key (fuel 10000) (max-depth 100)
+(defun eval-string (input &key (fuel 1000000) (max-depth 100)
                                (max-cons 10000) (max-output 1000)
                                (max-integer (expt 2 64))
                                (max-expr-depth 1000))

@@ -15,7 +15,7 @@
 
 (deftest test-exec-ctx-defaults
   (let ((ctx (make-exec-ctx)))
-    (ok (= 10000 (exec-ctx-fuel ctx)))
+    (ok (= 1000000 (exec-ctx-fuel ctx)))
     (ok (= 100 (exec-ctx-max-depth ctx)))
     (ok (= 0 (exec-ctx-current-depth ctx)))))
 
