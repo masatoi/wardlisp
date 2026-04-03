@@ -16,3 +16,4 @@
 # Test scratch space
 tests/tmp/*
 !tests/tmp/.gitkeep
+/.agent-shell/
