@@ -16,12 +16,17 @@
 (in-package :wardlisp)
 
 (defun evaluate (code &key (fuel 1000000) (max-depth 100) (max-cons 10000)
-                      (max-output 1000) (max-integer (expt 2 64)) (timeout 5))
+                      (max-output 1000) (max-integer (expt 2 64)) (timeout 5)
+                      (random-seed nil))
   "Evaluate CODE string in the restricted Lisp.
 Returns (values result metrics-plist).
 On error, returns (values nil metrics-plist) with :error-type and :error-message.
 Note: NIL is a valid successful result.  Always check :error-type to distinguish
-success from failure."
+success from failure.
+
+If RANDOM-SEED is a non-negative integer, calls to (random N) within this
+evaluation produce a deterministic sequence reproducible across calls.
+When RANDOM-SEED is NIL (default), the SBCL global *random-state* is used."
   ;; Validate inputs before creating execution context
   (unless (stringp code)
     (return-from evaluate
@@ -60,10 +65,20 @@ success from failure."
       (values nil (make-metrics nil
                    :error-type 'wardlisp-type-error
                    :error-message "evaluate: :timeout must be a positive number"))))
+  (unless (or (null random-seed)
+              (and (integerp random-seed) (not (minusp random-seed))))
+    (return-from evaluate
+      (values nil (make-metrics nil
+                   :error-type 'wardlisp-type-error
+                   :error-message
+                   "evaluate: :random-seed must be a non-negative integer or NIL"))))
   ;; Context is created after validation, bound outside handler-case
   ;; so error handlers can access metrics and output
   (let ((ctx (make-exec-ctx :fuel fuel :max-depth max-depth :max-cons max-cons
-                            :max-output max-output :max-integer max-integer)))
+                            :max-output max-output :max-integer max-integer))
+        (*random-state* (if random-seed
+                            (sb-ext:seed-random-state random-seed)
+                            (make-random-state nil))))
     (handler-case
         (sb-ext:with-timeout timeout
           (let* ((program (wardlisp/src/reader:wardlisp-read-program code))
