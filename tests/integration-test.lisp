@@ -371,3 +371,53 @@
       (evaluate "(or (define x 1) x)")
     (declare (ignore result))
     (ok (eq 'wardlisp-parse-error (getf metrics :error-type)))))
+
+(deftest test-random-returns-non-negative-integer-below-n
+  "(random n) returns an integer in [0, n)"
+  (multiple-value-bind (result metrics) (evaluate "(random 10)")
+    (declare (ignore metrics))
+    (ok (integerp result))
+    (ok (and (<= 0 result) (< result 10)))))
+
+(deftest test-random-with-seed-is-reproducible
+  "Same :random-seed produces the same sequence across calls"
+  (multiple-value-bind (r1 m1)
+      (evaluate "(list (random 10000) (random 10000) (random 10000))"
+                :random-seed 42)
+    (multiple-value-bind (r2 m2)
+        (evaluate "(list (random 10000) (random 10000) (random 10000))"
+                  :random-seed 42)
+      (declare (ignore m1 m2))
+      (ok (string= (print-value r1) (print-value r2))))))
+
+(deftest test-random-different-seeds-differ
+  "Different :random-seed values almost certainly produce different output"
+  (let ((r1 (evaluate "(random 1000000)" :random-seed 42))
+        (r2 (evaluate "(random 1000000)" :random-seed 999)))
+    (ok (not (eql r1 r2)))))
+
+(deftest test-random-no-seed-advances-global-state
+  "Unseeded :random-seed default: consecutive evaluations produce
+   independent sequences (the global *random-state* is advanced)."
+  (let ((r1 (evaluate "(list (random 1000000) (random 1000000) (random 1000000))"))
+        (r2 (evaluate "(list (random 1000000) (random 1000000) (random 1000000))")))
+    ;; PRNG collision over six 20-bit draws is astronomically unlikely.
+    (ok (string/= (print-value r1) (print-value r2)))))
+
+(deftest test-random-zero-rejected
+  "(random 0) signals a type error"
+  (multiple-value-bind (result metrics) (evaluate "(random 0)")
+    (declare (ignore result))
+    (ok (eq 'wardlisp-type-error (getf metrics :error-type)))))
+
+(deftest test-random-negative-rejected
+  "(random -5) signals a type error"
+  (multiple-value-bind (result metrics) (evaluate "(random -5)")
+    (declare (ignore result))
+    (ok (eq 'wardlisp-type-error (getf metrics :error-type)))))
+
+(deftest test-random-non-integer-rejected
+  "(random 3.14) signals a type error"
+  (multiple-value-bind (result metrics) (evaluate "(random 3.14)")
+    (declare (ignore result))
+    (ok (eq 'wardlisp-type-error (getf metrics :error-type)))))

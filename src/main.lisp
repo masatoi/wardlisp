@@ -16,12 +16,19 @@
 (in-package :wardlisp)
 
 (defun evaluate (code &key (fuel 1000000) (max-depth 100) (max-cons 10000)
-                      (max-output 1000) (max-integer (expt 2 64)) (timeout 5))
+                      (max-output 1000) (max-integer (expt 2 64)) (timeout 5)
+                      (random-seed nil))
   "Evaluate CODE string in the restricted Lisp.
 Returns (values result metrics-plist).
 On error, returns (values nil metrics-plist) with :error-type and :error-message.
 Note: NIL is a valid successful result.  Always check :error-type to distinguish
-success from failure."
+success from failure.
+
+If RANDOM-SEED is a non-negative integer, calls to (random N) within this
+evaluation produce a deterministic sequence reproducible across calls.
+When RANDOM-SEED is NIL (default), the process-global *random-state* is used
+directly so each call advances the shared state and consecutive evaluations
+produce independent random sequences."
   ;; Validate inputs before creating execution context
   (unless (stringp code)
     (return-from evaluate
@@ -60,31 +67,48 @@ success from failure."
       (values nil (make-metrics nil
                    :error-type 'wardlisp-type-error
                    :error-message "evaluate: :timeout must be a positive number"))))
+  (unless (or (null random-seed)
+              (and (integerp random-seed) (not (minusp random-seed))))
+    (return-from evaluate
+      (values nil (make-metrics nil
+                   :error-type 'wardlisp-type-error
+                   :error-message
+                   "evaluate: :random-seed must be a non-negative integer or NIL"))))
   ;; Context is created after validation, bound outside handler-case
   ;; so error handlers can access metrics and output
   (let ((ctx (make-exec-ctx :fuel fuel :max-depth max-depth :max-cons max-cons
                             :max-output max-output :max-integer max-integer)))
-    (handler-case
-        (sb-ext:with-timeout timeout
-          (let* ((program (wardlisp/src/reader:wardlisp-read-program code))
-                 (env (make-initial-env))
-                 (result (eval-program program env ctx)))
-            (values result (make-metrics ctx))))
-      (wardlisp-error (e)
-        (values nil
-                (make-metrics ctx :error-type (type-of e)
-                              :error-message (wardlisp-error-message e))))
-      (sb-ext:timeout ()
-        (values nil
-                (make-metrics ctx :error-type 'wardlisp-timeout-exceeded
-                              :error-message
-                              (format nil "Evaluation timed out after ~d second~:p"
-                                      timeout))))
-      (serious-condition (e)
-        (values nil
-                (make-metrics ctx :error-type 'wardlisp-internal-error
-                              :error-message
-                              (format nil "Internal error: ~a" (type-of e))))))))
+    (flet ((run-evaluate ()
+             (handler-case
+                 (sb-ext:with-timeout timeout
+                   (let* ((program (wardlisp/src/reader:wardlisp-read-program code))
+                          (env (make-initial-env))
+                          (result (eval-program program env ctx)))
+                     (values result (make-metrics ctx))))
+               (wardlisp-error (e)
+                 (values nil
+                         (make-metrics ctx :error-type (type-of e)
+                                       :error-message (wardlisp-error-message e))))
+               (sb-ext:timeout ()
+                 (values nil
+                         (make-metrics ctx :error-type 'wardlisp-timeout-exceeded
+                                       :error-message
+                                       (format nil "Evaluation timed out after ~d second~:p"
+                                               timeout))))
+               (serious-condition (e)
+                 (values nil
+                         (make-metrics ctx :error-type 'wardlisp-internal-error
+                                       :error-message
+                                       (format nil "Internal error: ~a" (type-of e))))))))
+      ;; When seeded, shadow *random-state* for reproducibility.
+      ;; When unseeded, use the process-global *random-state* directly so each
+      ;; call advances the shared state — otherwise binding to a copy via
+      ;; (make-random-state ...) would make consecutive evaluate calls produce
+      ;; the same sequence.
+      (if random-seed
+          (let ((*random-state* (sb-ext:seed-random-state random-seed)))
+            (run-evaluate))
+          (run-evaluate)))))
 
 (defun make-metrics (ctx &key error-type error-message)
   "Build metrics plist from execution context.  CTX may be nil if context creation itself failed."

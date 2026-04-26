@@ -35,7 +35,8 @@
            (cons "equal?" (make-builtin "equal?" #'builtin-equal-p 2))
            (cons "integer?" (make-builtin "integer?" #'builtin-integer-p 1))
            (cons "number?" (make-builtin "number?" #'builtin-number-p 1))
-           (cons "print" (make-builtin "print" #'builtin-print 1)))))
+           (cons "print" (make-builtin "print" #'builtin-print 1))
+           (cons "random" (make-builtin "random" #'builtin-random 1)))))
     (list nil builtins)))
 
 ;;; --- Helpers ---
@@ -295,6 +296,18 @@ Returns nil if either argument is not a number."
       (loop for ch across str do (vector-push-extend ch output))
       (vector-push-extend #\Newline output))
     value))
+
+(defun builtin-random (args ctx)
+  "Built-in random function. Returns a non-negative integer in [0, N) for
+positive integer N. Uses the dynamic *random-state*; bind via the
+EVALUATE :random-seed keyword for reproducible sequences."
+  (declare (ignore ctx))
+  (let ((n (first args)))
+    (ensure-integer "random" n)
+    (unless (plusp n)
+      (error 'wardlisp-type-error
+             :message (format nil "random: expected positive integer, got ~a" n)))
+    (random n)))
 
 ;;; --- Value printing ---
 
