@@ -396,6 +396,14 @@
         (r2 (evaluate "(random 1000000)" :random-seed 999)))
     (ok (not (eql r1 r2)))))
 
+(deftest test-random-no-seed-advances-global-state
+  "Unseeded :random-seed default: consecutive evaluations produce
+   independent sequences (the global *random-state* is advanced)."
+  (let ((r1 (evaluate "(list (random 1000000) (random 1000000) (random 1000000))"))
+        (r2 (evaluate "(list (random 1000000) (random 1000000) (random 1000000))")))
+    ;; PRNG collision over six 20-bit draws is astronomically unlikely.
+    (ok (string/= (print-value r1) (print-value r2)))))
+
 (deftest test-random-zero-rejected
   "(random 0) signals a type error"
   (multiple-value-bind (result metrics) (evaluate "(random 0)")
