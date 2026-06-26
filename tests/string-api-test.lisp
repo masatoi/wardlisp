@@ -42,3 +42,11 @@
     (ok (string= "hi" (string-value s)))
     (ok (string= "\"hi\"" (print-value s))))
   (ok (signals (make-string-value 42) 'wardlisp-type-error)))
+
+(deftest test-string-value-returns-independent-copy
+  "string-value returns a fresh copy; mutating it must not corrupt the wstring
+\(symmetric with make-string-value, which copies on the way in)."
+  (let* ((s (make-string-value "hi"))
+         (extracted (string-value s)))
+    (setf (char extracted 0) #\X)
+    (ok (string= "hi" (string-value s)))))

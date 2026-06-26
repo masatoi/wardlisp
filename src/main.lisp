@@ -21,8 +21,11 @@
 
 (defun valid-binding-value-p (value)
   "True if VALUE is a value the host may inject via EVALUATE's :bindings."
+  ;; Atoms only: number, t, nil, symbol (CL string), or boxed string. Compound
+  ;; ocons values are rejected -- the public API exports no ocons constructor and
+  ;; their contents would be unvalidated host objects.
   (or (numberp value) (eq value t) (null value)
-      (stringp value) (wstring-p value) (ocons-p value)))
+      (stringp value) (wstring-p value)))
 
 (defun build-binding-frame (bindings)
   "Validate BINDINGS, an alist of (\"name\" . value), and return an environment
@@ -67,7 +70,7 @@ produce independent random sequences.
 BINDINGS, when supplied, is an alist of (\"name\" . value) entries injected into
 the initial environment before evaluation, so scene code can reference
 host-provided reader flags. Names are downcased; values may be numbers, t, nil,
-symbols (bare strings), boxed strings (see MAKE-STRING-VALUE), or lists."
+symbols (bare strings), or boxed strings (see MAKE-STRING-VALUE)."
   ;; Validate inputs before creating execution context
   (unless (stringp code)
     (return-from evaluate
@@ -180,7 +183,9 @@ Signals a type error if VALUE is not a string."
     (error 'wardlisp-type-error
            :message (format nil "string-value: not a string: ~a"
                             (print-value value))))
-  (wstring-value value))
+  ;; Copy on egress (symmetric with make-string-value's ingress copy) so a host
+  ;; mutating the returned string cannot corrupt the shared wstring.
+  (copy-seq (wstring-value value)))
 
 (defun make-string-value (string)
   "Construct a wardlisp string value from a CL STRING, for host-side injection
@@ -191,8 +196,9 @@ Signals a type error if VALUE is not a string."
   (make-wstring (copy-seq string)))
 
 (defun symbol-value-p (value)
-  "True if VALUE is a wardlisp symbol (a bare lowercase string), not a string
-literal and not a boolean."
+  "True if VALUE is a wardlisp symbol. Symbols are represented as bare CL
+strings, so this is true for any CL string and false for boxed strings (see
+STRING-VALUE-P) and booleans."
   (and (stringp value) t))
 
 (defun number-value-p (value)

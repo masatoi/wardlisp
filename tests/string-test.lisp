@@ -171,3 +171,12 @@
   (multiple-value-bind (r m) (evaluate "x" :bindings '(("t" . 3)))
     (declare (ignore r))
     (ok (eq 'wardlisp-type-error (getf m :error-type)))))
+
+(deftest test-bindings-rejects-compound-values
+  "Only atoms may be injected; compound (ocons) values are rejected. The public
+API exports no ocons constructor, and R4 only needs flags/counters, so an
+injected pair (whose contents are unvalidated) is a type error."
+  (multiple-value-bind (r m)
+      (evaluate "x" :bindings (list (cons "x" (make-ocons 1 nil))))
+    (declare (ignore r))
+    (ok (eq 'wardlisp-type-error (getf m :error-type)))))
