@@ -36,7 +36,14 @@
            (cons "integer?" (make-builtin "integer?" #'builtin-integer-p 1))
            (cons "number?" (make-builtin "number?" #'builtin-number-p 1))
            (cons "print" (make-builtin "print" #'builtin-print 1))
-           (cons "random" (make-builtin "random" #'builtin-random 1)))))
+           (cons "random" (make-builtin "random" #'builtin-random 1))
+           ;; String operations
+           (cons "string-append"
+                 (make-builtin "string-append" #'builtin-string-append nil))
+           (cons "number->string"
+                 (make-builtin "number->string" #'builtin-number->string 1))
+           (cons "string-length"
+                 (make-builtin "string-length" #'builtin-string-length 1)))))
     (list nil builtins)))
 
 ;;; --- Helpers ---
@@ -59,6 +66,12 @@
   (unless (ocons-p value)
     (error 'wardlisp-type-error
            :message (format nil "~a: expected pair, got ~a" name (print-value value)))))
+
+(defun ensure-wstring (name value)
+  "Ensure VALUE is a string, or signal a type error."
+  (unless (wstring-p value)
+    (error 'wardlisp-type-error
+           :message (format nil "~a: expected string, got ~a" name (print-value value)))))
 
 ;;; --- Arithmetic ---
 
@@ -258,6 +271,8 @@ Returns nil if either argument is not a number."
   (let ((a (first args)) (b (second args)))
     (if (cond ((and (numberp a) (numberp b)) (cl:= a b))
               ((and (stringp a) (stringp b)) (string= a b))
+              ((and (wstring-p a) (wstring-p b))
+               (string= (wstring-value a) (wstring-value b)))
               (t (eql a b)))
         t
         nil)))
@@ -277,6 +292,8 @@ Returns nil if either argument is not a number."
       ((eql a b) (return t))
       ((and (numberp a) (numberp b)) (return (= a b)))
       ((and (stringp a) (stringp b)) (return (string= a b)))
+      ((and (wstring-p a) (wstring-p b))
+       (return (string= (wstring-value a) (wstring-value b))))
       ((and (ocons-p a) (ocons-p b))
        (unless (wardlisp-equal (ocons-ocar a) (ocons-ocar b) (1+ depth))
          (return nil))
@@ -309,6 +326,35 @@ EVALUATE :random-seed keyword for reproducible sequences."
              :message (format nil "random: expected positive integer, got ~a" n)))
     (random n)))
 
+;;; --- String operations ---
+
+(defun builtin-string-append (args ctx)
+  "Built-in string-append. Concatenate string values into a new string.
+Charges memory proportional to the result length."
+  (dolist (a args) (ensure-wstring "string-append" a))
+  (let ((total (reduce #'+ args :key (lambda (s) (length (wstring-value s)))
+                       :initial-value 0)))
+    (track-cons ctx (max 1 total))
+    (let ((out (make-string-output-stream)))
+      (dolist (a args) (write-string (wstring-value a) out))
+      (make-wstring (get-output-stream-string out)))))
+
+(defun builtin-number->string (args ctx)
+  "Built-in number->string. Convert a number to its decimal string.
+Charges memory proportional to the result length."
+  (let ((n (first args)))
+    (ensure-number "number->string" n)
+    (let ((s (print-value n)))
+      (track-cons ctx (max 1 (length s)))
+      (make-wstring s))))
+
+(defun builtin-string-length (args ctx)
+  "Built-in string-length. Return the number of characters in a string."
+  (declare (ignore ctx))
+  (let ((s (first args)))
+    (ensure-wstring "string-length" s)
+    (length (wstring-value s))))
+
 ;;; --- Value printing ---
 
 (defun format-float (value)
@@ -331,6 +377,7 @@ Limits nesting depth to prevent host stack overflow."
       (cond ((null value) "nil") ((eq value t) "t")
             ((integerp value) (format nil "~d" value))
             ((floatp value) (format-float value))
+            ((wstring-p value) (print-wstring value))
             ((stringp value) value)
             ((ocons-p value) (print-ocons value (1+ depth)))
             ((closure-p value)
@@ -354,3 +401,16 @@ Limits nesting depth to prevent host stack overflow."
             (write-string " . " s)
             (write-string (print-value rest depth) s)))
         (write-char #\) s))))
+
+(defun print-wstring (ws)
+  "Print a boxed string as a double-quoted literal, re-escaping \" \\ newline tab."
+  (with-output-to-string (s)
+    (write-char #\" s)
+    (loop for ch across (wstring-value ws)
+          do (case ch
+               (#\" (write-string "\\\"" s))
+               (#\\ (write-string "\\\\" s))
+               (#\Newline (write-string "\\n" s))
+               (#\Tab (write-string "\\t" s))
+               (t (write-char ch s))))
+    (write-char #\" s)))

@@ -23,6 +23,7 @@ WardLisp is a Lisp-1 (like Scheme: functions and variables share a single namesp
 |------|---------|
 | Integer | `42`, `-7`, `0` |
 | Boolean | `t`, `nil` |
+| String | `"hello"`, `"好感度: 3"` |
 | Pair / List | `(cons 1 2)`, `'(1 2 3)` |
 | Closure | `(lambda (x) (+ x 1))` |
 | Builtin | `+`, `cons`, `car` |
@@ -37,7 +38,26 @@ WardLisp is a Lisp-1 (like Scheme: functions and variables share a single namesp
 - **Comparison**: `=`, `<`, `<=`, `>`, `>=`
 - **Lists**: `cons`, `car`, `cdr`, `list`, `null?`, `atom?`, `length`, `append`
 - **Equality**: `eq?` (shallow), `equal?` (deep structural)
+- **Strings**: `string-append`, `number->string`, `string-length`
 - **Other**: `not`, `print`
+
+### Strings
+
+String literals use double quotes with `\"`, `\\`, `\n`, `\t` escapes. Strings are a
+distinct type from symbols (symbols are bare identifiers), so a host walking an
+evaluation result can tell dialogue text apart from directive tags.
+
+```scheme
+(string-append "好感度: " (number->string 3))   ;=> "好感度: 3"
+(string-length "あいう")                          ;=> 3
+(equal? "yo" "yo")                                ;=> t
+```
+
+String creation is charged against the `max-cons` memory budget in proportion to
+length, so unbounded string building is stopped by the sandbox just like list
+building. See `docs/language-spec.md` §17 for the host-side introspection API
+(`string-value-p`, `string-value`, `ocons-p`, …) and the `evaluate` `:bindings`
+option for injecting host values.
 
 ### Tail Call Optimization
 

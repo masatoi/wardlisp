@@ -3,6 +3,8 @@
   (:export
    ;; Cons cell
    #:ocons #:make-ocons #:ocons-p #:ocons-ocar #:ocons-ocdr
+   ;; String (boxed value, distinct from bare-string symbols)
+   #:wstring #:make-wstring #:wstring-p #:wstring-value
    ;; Closure
    #:closure #:make-closure #:closure-p
    #:closure-params #:closure-body #:closure-env #:closure-name
@@ -44,6 +46,13 @@
   "A cons cell in the restricted language. Separate from CL cons for counting."
   ocar
   ocdr)
+
+;;; --- Boxed string ---
+
+(defstruct (wstring (:constructor make-wstring (value)))
+  "A boxed string value. Distinct from symbols, which are bare CL strings,
+so the host can tell dialogue text apart from directive tags."
+  (value "" :type string))
 
 ;;; --- Closure ---
 
