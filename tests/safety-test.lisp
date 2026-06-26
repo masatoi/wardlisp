@@ -116,7 +116,8 @@
        'wardlisp-error)))
 
 (deftest test-reject-special-characters
-  (ok (signals (eval-safe "\"hello\"") 'wardlisp-parse-error))
+  ;; Double-quote now starts a string literal (covered in string-test); the
+  ;; other reader-reserved characters remain rejected.
   (ok (signals (eval-safe "`x") 'wardlisp-parse-error))
   (ok (signals (eval-safe ",x") 'wardlisp-parse-error))
   (ok (signals (eval-safe "\\x") 'wardlisp-parse-error))

@@ -1,7 +1,7 @@
 # WardLisp 言語仕様書
 
-* 版: 0.2
-* 対応実装バージョン: 0.2.0
+* 版: 0.3
+* 対応実装バージョン: 0.3.0
 
 ---
 
@@ -982,3 +982,143 @@ comment     ::= ';' (* 行末まで *)
 (my-sum '(10 20 30))
 ;=> 60
 ```
+
+---
+
+## 17. 文字列型 (v0.3.0 追加)
+
+WardLisp は本文テキストを扱うための **文字列型** を持つ。シンボル（裸の小文字文字列）とは
+別の専用型としてボックス化されており、両者は明確に区別される。
+
+### 17.1 文字列リテラル
+
+文字列リテラルは二重引用符 `"` で囲む。以下のエスケープをサポートする:
+
+| エスケープ | 意味 |
+|-----------|------|
+| `\"` | 二重引用符 |
+| `\\` | バックスラッシュ |
+| `\n` | 改行 |
+| `\t` | タブ |
+
+```scheme
+"おはよう、元気？"        ;=> "おはよう、元気？"
+"行1\n行2"               ;=> 改行を含む文字列
+```
+
+文字列リテラルは最大 10,000 文字までとし、これを超える場合は `parse-error` となる。
+未終端の文字列、および未対応のエスケープ（例 `\x`）も `parse-error` となる。
+
+### 17.2 値としての文字列
+
+* 文字列リテラルは自身に評価される（シンボル探索の対象にならない）。
+* 文字列はシンボルと **異なる型** である。同じ文字並びでも、シンボル `'foo` と
+  文字列 `"foo"` は区別される。
+
+```scheme
+"hi"          ;=> "hi"   (文字列)
+'hi           ;=> hi     (シンボル)
+```
+
+### 17.3 印字
+
+`print-value` は文字列をエスケープを復元した `"..."` 形式で印字し、シンボルは従来どおり
+裸で印字する。両者は印字結果で見分けられる。
+
+| 型 | 表示 | 例 |
+|----|------|----|
+| String | `"..."`（エスケープ復元） | `"やあ"`, `"a\nb"` |
+| Symbol | シンボル名そのまま | `foo` |
+
+### 17.4 等値
+
+`equal?` および `eq?` は文字列を **内容比較** する。文字列とシンボルは（同じ文字並びでも）
+等しくない。
+
+```scheme
+(equal? "yo" "yo")     ;=> t
+(equal? "yo" "yon")    ;=> nil
+(equal? "foo" 'foo)    ;=> nil
+(eq? "yo" "yo")        ;=> t
+```
+
+### 17.5 文字列操作の組み込み関数
+
+| 関数 | 引数 | 説明 | 例 |
+|------|------|------|----|
+| `string-append` | 0 個以上 | 文字列を連結 | `(string-append "a" "b")` => `"ab"`, `(string-append)` => `""` |
+| `number->string` | 1 | 数値を文字列に変換 | `(number->string 3)` => `"3"`, `(number->string 3.14)` => `"3.14"` |
+| `string-length` | 1 | 文字数（バイト数ではない） | `(string-length "あいう")` => `3` |
+
+`string-append` は文字列以外の引数に対して、`number->string` は数値以外に対して、
+`string-length` は文字列以外に対して `type-error` となる。
+
+```scheme
+(string-append "好感度: " (number->string 3))   ;=> "好感度: 3"
+```
+
+### 17.6 メモリ会計
+
+文字列の生成（リテラルの評価、`quote` 内の文字列、`string-append`、`number->string`）は
+文字長に比例して `max-cons` を消費する。これにより巨大文字列やループによる文字列生成は、
+リスト生成と同様に既存のサンドボックス境界（§11.3）で停止する。
+
+```scheme
+;; max-cons を超える文字列生成は memory-limit-exceeded で停止する
+(define (rep n acc)
+  (if (= n 0) acc (rep (- n 1) (string-append acc "xxxx"))))
+(rep 100000 "")        ;=> memory-limit-exceeded
+```
+
+### 17.7 型述語への影響
+
+`atom?` は文字列に対しても真を返す（ペア以外のすべての値が atom）。`integer?` /
+`number?` / `null?` は文字列に対して偽を返す。
+
+### 17.8 ホスト API: 値内省
+
+ホスト（CL 側）が `evaluate` の返り値を走査して演出データへ変換できるよう、`:wardlisp`
+パッケージから以下を公開する。内部ソースパッケージへ依存せず、結果を「リスト / 文字列 /
+シンボル / 数値」に判別して再帰巡回できる。
+
+| シンボル | 説明 |
+|---------|------|
+| `ocons-p` / `ocons-ocar` / `ocons-ocdr` | リスト（ペア）判定と分解 |
+| `string-value-p` | 文字列値かどうかの述語 |
+| `string-value` | 文字列値から CL 文字列を取り出す（非文字列は `type-error`） |
+| `make-string-value` | CL 文字列から文字列値を構築する（ホスト側の注入用） |
+| `symbol-value-p` | シンボル（裸文字列）かどうかの述語 |
+| `number-value-p` | 数値かどうかの述語 |
+
+```lisp
+(multiple-value-bind (result metrics) (wardlisp:evaluate "(list 'say \"やあ\" 3)")
+  (declare (ignore metrics))
+  (wardlisp:symbol-value-p (wardlisp:ocons-ocar result))                 ;=> t   ('say)
+  (wardlisp:string-value (wardlisp:ocons-ocar (wardlisp:ocons-ocdr result)))) ;=> "やあ"
+```
+
+### 17.9 evaluate の :bindings オプション
+
+`evaluate` は任意キーワード `:bindings` を受け取る。これは `("名前" . 値)` の連想リストで、
+評価前に初期環境へ束縛として注入される。ホストが提供する読者フラグなどをシーン式から
+参照させるために用いる。
+
+| 項目 | 仕様 |
+|------|------|
+| 名前 | 文字列。リーダ正規化に合わせて小文字化される。`t` / `nil` は予約済みで不可 |
+| 値 | 数値・`t`・`nil`・シンボル（文字列）・文字列値（`make-string-value`）。複合値（ocons）は不可 |
+| 不正 | 上記以外（連想リストでない、名前が非文字列、未対応の値型）は `type-error` |
+
+```lisp
+(wardlisp:evaluate "(if met-alice 1 0)"
+                   :bindings '(("met-alice" . t)))      ;=> 1
+(wardlisp:evaluate "(+ affection 1)"
+                   :bindings '(("affection" . 3)))      ;=> 4
+```
+
+トップレベルの `define` は注入された束縛をシャドウ（更新）できる。
+
+### 17.10 エラー型への追記
+
+`parse-error` の発生条件に、未終端の文字列リテラル・未対応のエスケープ・10,000 文字を
+超える文字列リテラルが加わる（§12 参照）。

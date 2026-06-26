@@ -117,3 +117,48 @@
   (let ((token-101f (concatenate 'string (make-string 99 :initial-element #\1) ".0")))
     (ok (signals (wardlisp-read token-101f)
          'wardlisp-parse-error))))
+
+;;; --- String literals ---
+
+(deftest test-read-string-basic
+  (ok (wstring-p (wardlisp-read "\"hi\"")))
+  (ok (string= "hi" (wstring-value (wardlisp-read "\"hi\""))))
+  (ok (string= "" (wstring-value (wardlisp-read "\"\"")))))
+
+(deftest test-read-string-escapes
+  ;; \n -> newline, \t -> tab, \" -> quote, \\ -> backslash
+  (ok (string= (format nil "a~cb" #\Newline)
+               (wstring-value (wardlisp-read "\"a\\nb\""))))
+  (ok (string= (format nil "a~cb" #\Tab)
+               (wstring-value (wardlisp-read "\"a\\tb\""))))
+  (ok (string= "a\"b" (wstring-value (wardlisp-read "\"a\\\"b\""))))
+  (ok (string= "a\\b" (wstring-value (wardlisp-read "\"a\\\\b\"")))))
+
+(deftest test-read-string-in-list
+  (let ((result (wardlisp-read "(say \"hi\")")))
+    (ok (equal "say" (first result)))
+    (ok (wstring-p (second result)))
+    (ok (string= "hi" (wstring-value (second result))))))
+
+(deftest test-read-string-distinct-from-symbol
+  ;; Same characters: a symbol is a bare CL string, a string is a wstring.
+  (ok (stringp (wardlisp-read "hello")))
+  (ok (not (wstring-p (wardlisp-read "hello"))))
+  (ok (wstring-p (wardlisp-read "\"hello\""))))
+
+(deftest test-read-string-unterminated
+  (ok (signals (wardlisp-read "\"abc") 'wardlisp-parse-error))
+  (ok (signals (wardlisp-read "\"abc\\") 'wardlisp-parse-error)))
+
+(deftest test-read-string-invalid-escape
+  (ok (signals (wardlisp-read "\"a\\xb\"") 'wardlisp-parse-error)))
+
+(deftest test-read-string-length-cap
+  "A string at the limit reads; one character over signals a parse-error."
+  (let ((at-limit (format nil "\"~a\""
+                          (make-string +max-string-length+ :initial-element #\a)))
+        (over-limit (format nil "\"~a\""
+                            (make-string (1+ +max-string-length+)
+                                         :initial-element #\a))))
+    (ok (wstring-p (wardlisp-read at-limit)))
+    (ok (signals (wardlisp-read over-limit) 'wardlisp-parse-error))))

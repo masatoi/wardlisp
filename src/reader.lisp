@@ -1,10 +1,14 @@
 (defpackage :wardlisp/src/reader
   (:use :cl :wardlisp/src/types)
-  (:export #:wardlisp-read #:wardlisp-read-program #:+max-parse-depth+))
+  (:export #:wardlisp-read #:wardlisp-read-program #:+max-parse-depth+
+           #:+max-string-length+))
 (in-package :wardlisp/src/reader)
 
 (defconstant +max-parse-depth+ 1000
   "Maximum nesting depth for S-expression parsing.")
+
+(defconstant +max-string-length+ 10000
+  "Maximum number of characters allowed in a single string literal.")
 
 (defun wardlisp-read (input)
   "Read a single expression from INPUT string."
@@ -40,6 +44,7 @@
            (error 'wardlisp-parse-error :message
                   (format nil "Reader macros (#) are not allowed at ~a"
                           (pos-to-location input pos))))
+          ((char= ch #\") (read-string input (1+ pos)))
           (t (read-atom input pos)))))
 
 (defun read-list (input pos &optional (depth 0))
@@ -66,6 +71,50 @@
   "Parse quoted expression after quote character."
   (multiple-value-bind (expr new-pos) (read-expr input pos depth)
     (values (list "quote" expr) new-pos)))
+
+(defun read-string (input pos)
+  "Parse a string literal. POS points just past the opening double-quote.
+Returns (values wstring new-pos). Supports escapes \\\" \\\\ \\n \\t and caps
+the decoded length at +max-string-length+."
+  (let ((out (make-string-output-stream))
+        (len (length input))
+        (open (1- pos))
+        (count 0))
+    (loop
+      (when (>= pos len)
+        (error 'wardlisp-parse-error :message
+               (format nil "Unterminated string starting at ~a"
+                       (pos-to-location input open))))
+      (let ((ch (char input pos)))
+        (cond
+          ((char= ch #\")
+           (return (values (make-wstring (get-output-stream-string out))
+                           (1+ pos))))
+          ((char= ch #\\)
+           (incf pos)
+           (when (>= pos len)
+             (error 'wardlisp-parse-error :message
+                    (format nil "Unterminated string escape at ~a"
+                            (pos-to-location input open))))
+           (let ((esc (char input pos)))
+             (write-char
+              (cond ((char= esc #\") #\")
+                    ((char= esc #\\) #\\)
+                    ((char= esc #\n) #\Newline)
+                    ((char= esc #\t) #\Tab)
+                    (t (error 'wardlisp-parse-error :message
+                              (format nil "Invalid string escape \\~a at ~a"
+                                      esc (pos-to-location input pos)))))
+              out)
+             (incf pos)
+             (incf count)))
+          (t (write-char ch out)
+             (incf pos)
+             (incf count)))
+        (when (> count +max-string-length+)
+          (error 'wardlisp-parse-error :message
+                 (format nil "String literal too long (max ~d characters)"
+                         +max-string-length+)))))))
 
 (defun read-atom (input pos)
   "Parse an atom (integer or symbol) starting at POS."

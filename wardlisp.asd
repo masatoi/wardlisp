@@ -1,5 +1,5 @@
 (defsystem "wardlisp"
-  :version "0.2.0"
+  :version "0.3.0"
   :author ""
   :license ""
   :depends-on ()
@@ -30,6 +30,8 @@
                  (:file "env-test")
                  (:file "evaluator-test")
                  (:file "safety-test")
-                 (:file "integration-test"))))
+                 (:file "integration-test")
+                 (:file "string-test")
+                 (:file "string-api-test"))))
   :description "Test system for wardlisp"
   :perform (test-op (op c) (symbol-call :rove :run c)))
