@@ -421,8 +421,13 @@ to max-integer like any other number."
 
 (defun format-float (value)
   "Format a float for wardlisp output. Removes trailing zeros but keeps at least one decimal.
-A subnormal prints as itself whatever flush-to-zero modes the host has set."
-  (let ((s (call-with-subnormals-kept (lambda () (format nil "~f" value)))))
+A subnormal prints as itself whatever flush-to-zero modes the host has set, and
+the host's float traps (inexact, say) do not stop the printing."
+  (let ((s (call-with-subnormals-kept
+            (lambda ()
+              (sb-int:with-float-traps-masked (:inexact :underflow :overflow :invalid
+                                               :divide-by-zero)
+                (format nil "~f" value))))))
     (let ((dot-pos (position #\. s)))
       (if dot-pos
           (let ((end (length s)))

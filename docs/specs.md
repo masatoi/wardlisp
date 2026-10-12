@@ -150,7 +150,8 @@ commit, after running the bundle against the new revision.
 - Floats in data values are generated up to 1000 in magnitude with three
   decimals, except for the `print-value` contract, the float-literal and
   float-overflow properties and the builtin probes, which reach magnitudes of
-  1e-300 to 1e300.
+  1e-300 to 1e300 (probes write such floats in exponent notation, since their
+  plain decimal form would exceed the 100-character literal limit).
 - `string-value-p`, `symbol-value-p` and `number-value-p` are specified by the
   representation section 17.8 describes (boxed string, bare CL string, CL
   number), so their contracts check the result shape and that representation

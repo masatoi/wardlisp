@@ -101,22 +101,26 @@ classified as wardlisp errors; underflow and inexact do not, so a result too
 small to represent rounds to zero.  The caller's float modes, every bit of
 them, are restored afterwards."
   (let ((saved (sb-vm:floating-point-modes)))
-    (unwind-protect
-         (progn
-           (sb-int:set-floating-point-modes :traps '(:overflow :invalid :divide-by-zero)
-                                            :rounding-mode :nearest)
-           ;; MXCSR bit 15 flushes subnormal results to zero and bit 6 reads
-           ;; subnormal operands as zero; SET-FLOATING-POINT-MODES leaves them.
-           #+x86-64
-           (setf (sb-vm:floating-point-modes)
-                 (logandc2 (sb-vm:floating-point-modes) (logior (ash 1 15) (ash 1 6))))
-           (with-standard-io-syntax
-             ;; Errors are signalled and classified inside evaluation; the
-             ;; caller's *BREAK-ON-SIGNALS* must not turn them into breaks.
-             (let ((*print-readably* nil)
-                   (*break-on-signals* nil))
-               (funcall thunk))))
-      (setf (sb-vm:floating-point-modes) saved))))
+    ;; Setting and restoring the modes run with interrupts deferred, so an
+    ;; interrupt that unwinds cannot leave the host with the sandbox's modes.
+    (sb-sys:without-interrupts
+      (unwind-protect
+           (progn
+             (sb-int:set-floating-point-modes :traps '(:overflow :invalid :divide-by-zero)
+                                              :rounding-mode :nearest)
+             ;; MXCSR bit 15 flushes subnormal results to zero and bit 6 reads
+             ;; subnormal operands as zero; SET-FLOATING-POINT-MODES leaves them.
+             #+x86-64
+             (setf (sb-vm:floating-point-modes)
+                   (logandc2 (sb-vm:floating-point-modes) (logior (ash 1 15) (ash 1 6))))
+             (sb-sys:with-local-interrupts
+               (with-standard-io-syntax
+                 ;; Errors are signalled and classified inside evaluation; the
+                 ;; caller's *BREAK-ON-SIGNALS* must not turn them into breaks.
+                 (let ((*print-readably* nil)
+                       (*break-on-signals* nil))
+                   (funcall thunk)))))
+        (setf (sb-vm:floating-point-modes) saved)))))
 
 (defun invalid-argument (message)
   "Return EVALUATE's two values for an argument refused with MESSAGE."
@@ -142,11 +146,19 @@ moment, such as one the host set around EVALUATE.  Should a single step run on
 for another second, a second timer signals SANDBOX-DEADLINE-REACHED to stop it."
   (let ((soft (sb-ext:make-timer (lambda () (setf (exec-ctx-deadline-passed ctx) t))))
         (hard (sb-ext:make-timer (lambda () (error 'sandbox-deadline-reached)))))
-    (sb-ext:schedule-timer soft seconds)
-    (sb-ext:schedule-timer hard (+ seconds 1))
-    (unwind-protect (funcall thunk)
-      (sb-ext:unschedule-timer hard)
-      (sb-ext:unschedule-timer soft))))
+    ;; Scheduling and the cleanup run with interrupts deferred, and only THUNK
+    ;; with them enabled: an interrupt (a host timeout, say) that unwinds
+    ;; between the two SCHEDULE-TIMER calls or in the middle of the cleanup
+    ;; would otherwise leave the hard timer to fire later in the host's own
+    ;; code, or inside another evaluation.
+    (sb-sys:without-interrupts
+      (unwind-protect
+           (progn
+             (sb-ext:schedule-timer soft seconds)
+             (sb-ext:schedule-timer hard (+ seconds 1))
+             (sb-sys:with-local-interrupts (funcall thunk)))
+        (sb-ext:unschedule-timer hard)
+        (sb-ext:unschedule-timer soft)))))
 
 (defun timeout-message (timeout)
   "Return the error message for an evaluation stopped after TIMEOUT seconds."
@@ -267,9 +279,9 @@ produce independent random sequences.
 
 BINDINGS, when supplied, is an alist of (\"name\" . value) entries injected into
 the initial environment before evaluation, so scene code can reference
-host-provided reader flags. Names are downcased; values may be integers,
-double-floats (within MAX-INTEGER), t, nil, symbols (bare strings), or boxed
-strings (see MAKE-STRING-VALUE).
+host-provided reader flags. Names are downcased; values may be integers and
+finite floats (converted to double-floats), both within MAX-INTEGER, t, nil,
+symbols (bare strings), or boxed strings (see MAKE-STRING-VALUE).
 
 The result does not depend on the caller's reader and printer variables or
 floating-point traps (see CALL-WITH-SANDBOX-HOST-ENVIRONMENT)."

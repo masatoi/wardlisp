@@ -255,12 +255,41 @@ boxed string or symbol string with it."
         ((stringp value) (copy-seq value))
         (t value)))
 
+(defun scientific-text (plain)
+  "Rewrite the plain decimal PLAIN (as PRINT-VALUE writes a float: optional
+minus, digits, a point, digits) in exponent notation with the same digits, so
+it denotes exactly the same number but stays short: \"0.00015\" becomes
+\"1.5e-4\"."
+  (let* ((negative (char= #\- (char plain 0)))
+         (body (if negative (subseq plain 1) plain))
+         (point (position #\. body))
+         (digits (remove #\. body))
+         (first (position #\0 digits :test #'char/=)))
+    (if (null first)
+        plain
+        (let* ((last (position #\0 digits :test #'char/= :from-end t))
+               (significant (subseq digits first (1+ last)))
+               (exponent (- point first 1)))
+          (format nil "~:[~;-~]~C.~:[0~;~:*~A~]e~D" negative (char significant 0)
+                  (and (> (length significant) 1) (subseq significant 1)) exponent)))))
+
+(defun datum-text (value)
+  "Return the printed form of the data VALUE as source text: PRINT-VALUE's, but
+with a float whose plain decimal form would be too long for a literal written
+in exponent notation."
+  (cond ((floatp value)
+         (let ((plain (print-value value)))
+           (if (> (length plain) 90) (scientific-text plain) plain)))
+        ((ocons-p value)
+         (format nil "(~{~A~^ ~})" (mapcar #'datum-text (ocons-elements value))))
+        (t (print-value value))))
+
 (defun datum-source (value)
-  "Return source text that evaluates to the data VALUE: a quoted printed form
-for symbols and lists, the printed form itself for self-evaluating atoms."
+  "Return source text that evaluates to the data VALUE: a quoted form for
+symbols and lists, the form itself for self-evaluating atoms (see DATUM-TEXT)."
   (if (or (stringp value) (ocons-p value))
-      (format nil "'~A" (print-value value))
-      (print-value value)))
+      (format nil "'~A" (datum-text value))
+      (datum-text value)))
 
 ;;; --- Random programs ---
 

@@ -516,8 +516,9 @@ lets it finish, never as a host condition."
            ((:timeout-ratio :timeout-maximum) (null type))
            ((:timeout-tiny-ratio :timeout-tiny-float)
             (member type '(nil wardlisp/src/types:wardlisp-timeout-exceeded)))
-           (t (member type '(wardlisp/src/types:wardlisp-type-error
-                             wardlisp/src/types:wardlisp-integer-limit-exceeded))))
+           ;; Sections 13.1 and 17.9 call every malformed host argument --
+           ;; NaN and infinities included -- a type-error.
+           (t (eq type 'wardlisp/src/types:wardlisp-type-error)))
          (eql 3 (run "(+ 1 2)")))))
 
 (defproperty float-overflow-is-a-number-limit

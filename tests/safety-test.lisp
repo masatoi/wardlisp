@@ -391,6 +391,24 @@ host"
                 :host-body-completed)
             (sb-ext:timeout () :host-timeout)))))
 
+(deftest test-interrupted-evaluate-leaves-no-timer-behind
+  "A host timeout that unwinds out of evaluate at any moment, including while
+evaluate is setting up its timers, leaves no timer to fire in the host later"
+  (let ((escaped 0))
+    (handler-bind ((serious-condition
+                     (lambda (c)
+                       (unless (typep c 'sb-ext:timeout)
+                         (incf escaped)))))
+      (loop repeat 100
+            do (handler-case
+                   (sb-ext:with-timeout 0.02
+                     (loop (wardlisp:evaluate "1" :timeout 1/10)))
+                 (sb-ext:timeout () nil)))
+      ;; Long enough for any second-stage timer (timeout + 1 s) to fire.
+      (handler-case (sleep 1.3)
+        (serious-condition () (incf escaped))))
+    (ok (zerop escaped))))
+
 (defun correctly-rounded-subnormal (rational)
   "Return the double nearest to RATIONAL, a positive value below the smallest
 normalized double, rounding ties to even."
@@ -446,6 +464,19 @@ denormals-are-zero bits, which are restored afterwards"
         (setf (sb-vm:floating-point-modes) saved))))
   #-x86-64
   (skip "flush-to-zero bits are checked on x86-64 only"))
+
+(deftest test-print-value-ignores-host-float-traps
+  "print-value formats floats whatever traps the host has enabled"
+  (let* ((floats '(0.1d0 0.5d0 3.0d0 1d18))
+         (expected (mapcar #'wardlisp:print-value floats))
+         ;; Only the printing runs under the host's traps: Rove itself does
+         ;; float arithmetic that the inexact trap would stop.
+         (actual (call-with-host-float-traps
+                  '(:overflow :invalid :divide-by-zero :inexact :underflow)
+                  (lambda ()
+                    (handler-case (mapcar #'wardlisp:print-value floats)
+                      (arithmetic-error (e) (type-of e)))))))
+    (ok (equal expected actual))))
 
 ;; --- Output limit ---
 (deftest test-output-limit

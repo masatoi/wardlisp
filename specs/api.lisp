@@ -161,11 +161,12 @@ the float's value."
             (char= #\" (char result (1- (length result))))
             (reads-back-as-p result value)))
     (:list
-     "A proper list prints in parentheses."
+     "A proper list prints as its elements' printed forms, separated by single
+spaces, in parentheses."
      (:when (ocons-p value))
      (:returns string)
-     (:post (char= #\( (char result 0))
-            (char= #\) (char result (1- (length result))))))))
+     (:post (string= result (format nil "(~{~A~^ ~})"
+                                    (mapcar #'print-value (ocons-elements value))))))))
 
 ;;; --- Value introspection (section 17.8) ---
 
