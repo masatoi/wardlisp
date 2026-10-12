@@ -118,6 +118,14 @@
     (ok (signals (wardlisp-read token-101f)
          'wardlisp-parse-error))))
 
+(deftest test-out-of-range-float-literal-is-parse-error
+  "A float literal beyond double-float range is a parse-error, not a host reader error"
+  (dolist (token '("1e400" "-1e400" "1.5e309" "+2E999" ".5e400"))
+    (ok (signals (wardlisp-read token) 'wardlisp-parse-error) token))
+  (ok (signals (wardlisp-read-program "(+ 1 1e400)") 'wardlisp-parse-error))
+  ;; The largest finite literal still reads
+  (ok (floatp (wardlisp-read "1.7976931348623157e308"))))
+
 ;;; --- String literals ---
 
 (deftest test-read-string-basic

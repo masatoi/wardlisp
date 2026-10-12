@@ -148,10 +148,20 @@ the decoded length at +max-string-length+."
              (error 'wardlisp-parse-error
                     :message (format nil "Float literal too long (~d chars, max 100)"
                                     (length token))))
-           (let ((*read-default-float-format* 'double-float)
-                   (*read-eval* nil))
-             (read-from-string token)))
+           (parse-float-token token))
           (t lower))))
+
+(defun parse-float-token (token)
+  "Read TOKEN, which FLOAT-TOKEN-P accepted, as a double-float.  A literal
+beyond double-float range is a wardlisp-parse-error: the host reader's own error
+must not escape the sandbox."
+  (handler-case
+      (let ((*read-default-float-format* 'double-float)
+            (*read-eval* nil))
+        (read-from-string token))
+    ((or reader-error arithmetic-error) ()
+      (error 'wardlisp-parse-error
+             :message (format nil "Float literal out of range: ~a" token)))))
 
 (defun integer-token-p (token)
   "Check if TOKEN looks like an integer."

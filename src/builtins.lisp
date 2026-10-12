@@ -75,24 +75,39 @@
 
 ;;; --- Arithmetic ---
 
+(defun call-checking-float-range (name thunk)
+  "Call THUNK, which computes the result of the arithmetic builtin NAME.  A float
+overflow -- a result, or an integer converted to a float, beyond double-float
+range -- is reported as wardlisp-integer-limit-exceeded: such a number exceeds
+every size the language can represent, whatever max-integer allows, and the host
+condition must not escape the sandbox."
+  (handler-case (funcall thunk)
+    (floating-point-overflow ()
+      (error 'wardlisp-integer-limit-exceeded
+             :message (format nil "~a: result exceeds the float range" name)))))
+
 (defun builtin-add (args ctx)
   "Built-in + function. Variadic addition."
   (dolist (a args) (ensure-number "+" a))
-  (check-integer ctx (reduce #'+ args :initial-value 0)))
+  (check-integer ctx (call-checking-float-range
+                      "+" (lambda () (reduce #'+ args :initial-value 0)))))
 
 (defun builtin-sub (args ctx)
   "Built-in - function. Unary negation or variadic subtraction."
   (when (null args)
     (error 'wardlisp-arity-error :message "- requires at least 1 argument"))
   (dolist (a args) (ensure-number "-" a))
-  (check-integer ctx (if (= 1 (length args))
-                         (- (first args))
-                         (reduce #'- args))))
+  (check-integer ctx (call-checking-float-range
+                      "-" (lambda ()
+                            (if (= 1 (length args))
+                                (- (first args))
+                                (reduce #'- args))))))
 
 (defun builtin-mul (args ctx)
   "Built-in * function. Variadic multiplication."
   (dolist (a args) (ensure-number "*" a))
-  (check-integer ctx (reduce #'* args :initial-value 1)))
+  (check-integer ctx (call-checking-float-range
+                      "*" (lambda () (reduce #'* args :initial-value 1)))))
 
 (defun builtin-quotient (args ctx)
   "Built-in quotient function. Integer division (truncate toward zero)."
@@ -119,9 +134,11 @@ divisible, otherwise returns float."
     (if (and (integerp a) (integerp b) (zerop (rem a b)))
         (check-integer ctx (cl:/ a b))
         (check-integer ctx
-                       (coerce (cl:/ (coerce a 'double-float)
-                                     (coerce b 'double-float))
-                               'double-float)))))
+                       (call-checking-float-range
+                        "/" (lambda ()
+                              (coerce (cl:/ (coerce a 'double-float)
+                                            (coerce b 'double-float))
+                                      'double-float)))))))
 
 ;;; --- Comparison ---
 

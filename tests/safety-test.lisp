@@ -51,6 +51,28 @@
        (eval-safe "(* 999999.0 999999.0)" :max-integer 1000000)
        'wardlisp-integer-limit-exceeded)))
 
+(deftest test-float-overflow-is-integer-limit
+  "A float result beyond double-float range is integer-limit-exceeded even when
+max-integer is larger than any double-float"
+  (let ((huge (expt 10 1000))
+        (big-int (format nil "(* ~{~A~^ ~})" (make-list 4 :initial-element
+                                                          (format nil "1~94,,,'0@A" 0)))))
+    (dolist (code (list "(* 1e300 1e300)" "(+ 1e308 1e308)" "(- -1e308 1e308)"
+                        "(/ 1e300 1e-300)" "(* 1e200 1e200 0)"
+                        (format nil "(+ ~A 0.5)" big-int)
+                        (format nil "(/ (+ ~A 1) 3)" big-int)))
+      (ok (signals (eval-safe code :fuel 1000 :max-integer huge)
+                   'wardlisp-integer-limit-exceeded)
+          code))))
+
+(deftest test-evaluate-never-reports-internal-error-for-float-edges
+  "Float edge cases stay inside wardlisp's own error types through EVALUATE"
+  (dolist (case `(("1e400" . wardlisp-parse-error)
+                  ("(= 1e400 1)" . wardlisp-parse-error)
+                  ("(* 1e300 1e300)" . wardlisp-integer-limit-exceeded)))
+    (let ((metrics (nth-value 1 (wardlisp:evaluate (car case) :max-integer (expt 10 1000)))))
+      (ok (eq (cdr case) (getf metrics :error-type)) (car case)))))
+
 ;; --- Output limit ---
 (deftest test-output-limit
   (ok (signals
