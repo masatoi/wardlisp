@@ -149,9 +149,14 @@ divisible, otherwise returns float."
         (check-integer ctx
                        (call-checking-float-range
                         "/" (lambda ()
-                              (coerce (cl:/ (coerce a 'double-float)
-                                            (coerce b 'double-float))
-                                      'double-float)))))))
+                              ;; Two integers divide exactly first, so only a
+                              ;; quotient beyond the float range overflows,
+                              ;; not an operand.
+                              (if (and (integerp a) (integerp b))
+                                  (coerce (cl:/ a b) 'double-float)
+                                  (coerce (cl:/ (coerce a 'double-float)
+                                                (coerce b 'double-float))
+                                          'double-float))))))))
 
 ;;; --- Comparison ---
 
@@ -437,7 +442,11 @@ one character, so the work done is bounded by the characters written."
             ((stringp value) (emit value stream))
             ((ocons-p value) (write-ocons value stream (1+ depth)))
             ((closure-p value)
-             (emit (format nil "#<closure~@[ ~a~]>" (closure-name value)) stream))
+             (emit "#<closure" stream)
+             (when (closure-name value)
+               (emit " " stream)
+               (emit (closure-name value) stream))
+             (emit ">" stream))
             ((builtin-p value)
              (emit (format nil "#<builtin ~a>" (builtin-name value)) stream))
             (t (emit "#<unknown>" stream)))))

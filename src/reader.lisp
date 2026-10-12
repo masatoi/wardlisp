@@ -136,7 +136,7 @@ the decoded length at +max-string-length+."
       (when (find #\: token)
         (error 'wardlisp-parse-error :message
                (format nil "Package prefix not allowed: ~a at ~a"
-                       token (pos-to-location input start))))
+                       (abbreviate-text token) (pos-to-location input start))))
       (values (parse-token token) pos))))
 
 (defun parse-token (token)

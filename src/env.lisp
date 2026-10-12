@@ -16,10 +16,11 @@
                (let ((value (cdr pair)))
                  (when (eq value +uninitialized-binding+)
                    (error 'wardlisp-name-error
-                          :message (format nil "Uninitialized local binding: ~a" name)))
+                          :message (format nil "Uninitialized local binding: ~a"
+                                          (abbreviate-text name))))
                  (return-from env-lookup value)))))
   (error 'wardlisp-name-error
-         :message (format nil "Undefined variable: ~a" name)))
+         :message (format nil "Undefined variable: ~a" (abbreviate-text name))))
 
 (defun env-set! (env name value)
   "Set NAME to VALUE in the first frame where it's found."
@@ -29,4 +30,4 @@
                (setf (cdr pair) value)
                (return-from env-set! value))))
   (error 'wardlisp-name-error
-         :message (format nil "Cannot set undefined variable: ~a" name)))
+         :message (format nil "Cannot set undefined variable: ~a" (abbreviate-text name))))

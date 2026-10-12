@@ -113,6 +113,26 @@ afterwards."
   "Return EVALUATE's two values for an argument refused with MESSAGE."
   (values nil (make-metrics nil :error-type 'wardlisp-type-error :error-message message)))
 
+(defun host-signal-p (condition)
+  "True if CONDITION is one the host raises asynchronously -- a timer's timeout
+or an interactive interrupt -- rather than one evaluation caused.  EVALUATE
+lets such a condition through unless it is its own timeout."
+  (typep condition '(or sb-ext:timeout sb-sys:interactive-interrupt)))
+
+(defun own-deadline-passed-p (started timeout)
+  "True if TIMEOUT seconds have (all but) elapsed since the internal real time
+STARTED, so that a timeout signalled now is EVALUATE's own."
+  (>= (/ (- (get-internal-real-time) started) internal-time-units-per-second)
+      (* 99/100 timeout)))
+
+(defun timeout-message (timeout)
+  "Return the error message for an evaluation stopped after TIMEOUT seconds."
+  (format nil "Evaluation timed out after ~a second~:[s~;~]"
+          (describe-value (if (rationalp timeout)
+                              (if (integerp timeout) timeout (float timeout 1d0))
+                              timeout))
+          (eql timeout 1)))
+
 (defun evaluate-in-sandbox (code fuel max-depth max-cons max-output max-integer timeout
                             random-seed bindings)
   "Do EVALUATE's work, inside CALL-WITH-SANDBOX-HOST-ENVIRONMENT."
@@ -150,36 +170,48 @@ afterwards."
   (let ((ctx (make-exec-ctx :fuel fuel :max-depth max-depth :max-cons max-cons
                             :max-output max-output :max-integer max-integer)))
     (flet ((run-evaluate ()
-             (handler-case
-                 (sb-ext:with-timeout timeout
-                   (let* ((program (wardlisp/src/reader:wardlisp-read-program code))
-                          (frame (build-binding-frame bindings ctx))
-                          (env (make-initial-env))
-                          (result (progn (setf (first env) frame)
-                                         (eval-program program env ctx))))
-                     (values result (make-metrics ctx))))
-               (wardlisp-error (e)
-                 (values nil
-                         (make-metrics ctx :error-type (type-of e)
-                                       :error-message (wardlisp-error-message e))))
-               (sb-ext:timeout ()
-                 (values nil
-                         (make-metrics ctx :error-type 'wardlisp-timeout-exceeded
-                                       :error-message
-                                       (format nil "Evaluation timed out after ~
-                                                    ~a second~:[s~;~]"
-                                               (describe-value
-                                                (if (rationalp timeout)
-                                                    (if (integerp timeout)
-                                                        timeout
-                                                        (float timeout 1d0))
-                                                    timeout))
-                                               (eql timeout 1)))))
-               (serious-condition (e)
-                 (values nil
-                         (make-metrics ctx :error-type 'wardlisp-internal-error
-                                       :error-message
-                                       (format nil "Internal error: ~a" (type-of e))))))))
+             ;; The handlers only classify and unwind: they run where the
+             ;; condition was signalled, possibly on an exhausted stack, so the
+             ;; metrics are built after unwinding.
+             (multiple-value-bind (outcome payload)
+                 (let ((started (get-internal-real-time)))
+                   (block evaluation
+                     (handler-bind
+                         ((wardlisp-error
+                            (lambda (e) (return-from evaluation (values :wardlisp-error e))))
+                          (serious-condition
+                            (lambda (e)
+                              (cond ((not (host-signal-p e))
+                                     (return-from evaluation (values :internal-error e)))
+                                    ;; Our own timer: the deadline has passed.  A
+                                    ;; timeout or interrupt the host set around
+                                    ;; EVALUATE is declined, so it reaches the host.
+                                    ((and (typep e 'sb-ext:timeout)
+                                          (own-deadline-passed-p started timeout))
+                                     (return-from evaluation (values :timeout nil)))))))
+                       (sb-ext:with-timeout timeout
+                         ;; Host arguments are checked before the program is read,
+                         ;; so a malformed :bindings is reported whatever the
+                         ;; program text.
+                         ;; LET evaluates its forms left to right: the frame first.
+                         (let ((frame (build-binding-frame bindings ctx))
+                               (program (wardlisp/src/reader:wardlisp-read-program code))
+                               (env (make-initial-env)))
+                           (setf (first env) frame)
+                           (values :value (eval-program program env ctx)))))))
+               (ecase outcome
+                 (:value (values payload (make-metrics ctx)))
+                 (:wardlisp-error
+                  (values nil (make-metrics ctx :error-type (type-of payload)
+                                                :error-message (wardlisp-error-message payload))))
+                 (:timeout
+                  (values nil (make-metrics ctx :error-type 'wardlisp-timeout-exceeded
+                                                :error-message (timeout-message timeout))))
+                 (:internal-error
+                  (values nil (make-metrics ctx :error-type 'wardlisp-internal-error
+                                                :error-message
+                                                (format nil "Internal error: ~a"
+                                                        (type-of payload)))))))))
       ;; When seeded, shadow *random-state* for reproducibility.
       ;; When unseeded, use the process-global *random-state* directly so each
       ;; call advances the shared state — otherwise binding to a copy via
@@ -213,17 +245,24 @@ strings (see MAKE-STRING-VALUE).
 
 The result does not depend on the caller's reader and printer variables or
 floating-point traps (see CALL-WITH-SANDBOX-HOST-ENVIRONMENT)."
-  ;; Last line of defence: EVALUATE never signals.  A host condition that
-  ;; escapes everything inside is a defect, reported as internal-error.
-  (handler-case
-      (call-with-sandbox-host-environment
-       (lambda ()
-         (evaluate-in-sandbox code fuel max-depth max-cons max-output max-integer timeout
-                              random-seed bindings)))
-    (serious-condition (e)
-      (values nil (make-metrics nil :error-type 'wardlisp-internal-error
-                                    :error-message (format nil "Internal error: ~a"
-                                                           (type-of e)))))))
+  ;; Last line of defence: EVALUATE never signals.  A condition that escapes
+  ;; everything inside is a defect, reported as internal-error -- except a
+  ;; timeout or interrupt the host raised itself, which is the host's own.
+  (let ((escaped
+          (block guarded
+            (handler-bind
+                ((serious-condition
+                   (lambda (e)
+                     (unless (host-signal-p e)
+                       (return-from guarded e)))))
+              (return-from evaluate
+                (call-with-sandbox-host-environment
+                 (lambda ()
+                   (evaluate-in-sandbox code fuel max-depth max-cons max-output max-integer
+                                        timeout random-seed bindings))))))))
+    (values nil (make-metrics nil :error-type 'wardlisp-internal-error
+                                  :error-message (format nil "Internal error: ~a"
+                                                         (type-of escaped))))))
 
 (defun make-metrics (ctx &key error-type error-message)
   "Build metrics plist from execution context.  CTX may be nil if context creation itself failed."

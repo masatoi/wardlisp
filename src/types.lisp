@@ -37,7 +37,8 @@
    #:wardlisp-internal-error
    #:+uninitialized-binding+
    ;; Helpers
-   #:consume-fuel #:track-depth #:track-expr-depth #:track-cons #:check-integer))
+   #:consume-fuel #:track-depth #:track-expr-depth #:track-cons #:check-integer
+   #:abbreviate-text))
 (in-package :wardlisp/src/types)
 
 ;;; --- Custom cons cell for allocation counting ---
@@ -161,14 +162,18 @@ so the host can tell dialogue text apart from directive tags."
                             (exec-ctx-cons-count ctx)
                             (exec-ctx-max-cons ctx)))))
 
+(defun abbreviate-text (text)
+  "Return TEXT, a name or token for an error message, cut to 200 characters with
+\"...\" when longer."
+  (if (> (length text) 200)
+      (concatenate 'string (subseq text 0 200) "...")
+      text))
+
 (defun abbreviate-number (number)
   "Return NUMBER in plain decimal for an error message -- ~F for a float, as
 wardlisp prints it, rather than the host's 1.0d20 -- cut to 200 characters with
 \"...\" when longer."
-  (let ((text (if (floatp number) (format nil "~f" number) (format nil "~d" number))))
-    (if (> (length text) 200)
-        (concatenate 'string (subseq text 0 200) "...")
-        text)))
+  (abbreviate-text (if (floatp number) (format nil "~f" number) (format nil "~d" number))))
 
 (defun check-integer (ctx value)
   "Check number is within allowed range. Signals integer-limit-exceeded if not.

@@ -328,6 +328,44 @@ classifies internally"
     (ok (eq 'wardlisp-type-error
             (getf (nth-value 1 (wardlisp:evaluate "(car 1)")) :error-type)))))
 
+(deftest test-host-recursion-is-bounded-whatever-max-depth
+  "Recursion through non-final body expressions or define initializers counts
+towards the expression nesting limit, so a huge max-depth cannot exhaust the
+host stack"
+  (dolist (code '("(define (f n) (if (> n 0) (f (- n 1)) 0) n) (f 100000)"
+                  "(define (f n) (define y (if (= n 0) 0 (f (- n 1)))) (+ y 1)) (f 100000)"
+                  "(define (f n) (if (= n 0) 0 (+ 1 (f (- n 1))))) (f 100000)"))
+    (ok (eq 'wardlisp-recursion-limit-exceeded
+            (getf (nth-value 1 (wardlisp:evaluate code :max-depth 1000000 :fuel 100000000))
+                  :error-type))
+        code)))
+
+(deftest test-host-arguments-are-checked-before-the-program
+  "A malformed host argument is reported even when the program would not parse"
+  (ok (eq 'wardlisp-type-error
+          (getf (nth-value 1 (wardlisp:evaluate "(" :bindings 42)) :error-type))))
+
+(deftest test-integer-division-is-exact-before-conversion
+  "/ on two integers divides exactly, then converts the quotient to a float"
+  (let ((huge (expt 10 1000))
+        (x (format nil "(* ~{~A~^ ~})" (make-list 5 :initial-element (expt 10 80)))))
+    (ok (eql 0.0d0 (wardlisp:evaluate (format nil "(/ 1 ~A)" x) :max-integer huge)))
+    (ok (eql 1.0d0 (wardlisp:evaluate (format nil "(/ (+ ~A 1) ~A)" x x) :max-integer huge)))))
+
+(deftest test-host-timeout-is-not-swallowed
+  "A timeout the host sets around evaluate reaches the host"
+  (ok (eq :host-timeout
+          (handler-case
+              (sb-ext:with-timeout 1
+                (wardlisp:evaluate "(define (f) (f)) (f)" :timeout 100 :fuel (expt 10 12)))
+            (sb-ext:timeout () :host-timeout)))))
+
+(deftest test-long-names-in-messages-are-cut
+  "Messages that echo a source token or name cut it at 200 characters"
+  (let ((name (make-string 5000 :initial-element #\a)))
+    (dolist (code (list name (format nil "~A:b" name)))
+      (ok (< (length (getf (nth-value 1 (wardlisp:evaluate code)) :error-message)) 300)))))
+
 ;; --- Output limit ---
 (deftest test-output-limit
   (ok (signals

@@ -34,10 +34,16 @@
 
 (defun wardlisp-eval (expr env ctx)
   "Evaluate EXPR in ENV with execution context CTX.
-Resolves all tail-calls via trampoline. Always returns a final value."
+Resolves all tail-calls via trampoline. Always returns a final value.
+A trampoline started here runs on top of the caller's host stack, so it counts
+as one level of expression nesting: every host recursion of the evaluator is
+then bounded by the nesting limit, whatever max-depth allows."
   (let ((result (eval-inner expr env ctx)))
     (if (tail-call-p result)
-        (trampoline result ctx)
+        (progn
+          (track-expr-depth ctx 1)
+          (unwind-protect (trampoline result ctx)
+            (track-expr-depth ctx -1)))
         result)))
 
 (defun trampoline (tc ctx)
@@ -213,7 +219,7 @@ contains a duplicate.  Linear in the number of names."
   (let ((seen (make-hash-table :test #'equal)))
     (dolist (name names)
       (when (gethash name seen)
-        (error 'wardlisp-parse-error :message (format nil "~a: ~a" message name)))
+        (error 'wardlisp-parse-error :message (format nil "~a: ~a" message (abbreviate-text name))))
       (setf (gethash name seen) t))))
 
 (defun eval-lambda (args env ctx)
@@ -473,7 +479,7 @@ Last argument is in tail position (use eval-inner)."
        (when (/= (length params) (length args))
          (error 'wardlisp-arity-error
                 :message (format nil "~a expects ~d arg~:p, got ~d"
-                                 (or (closure-name func) "lambda")
+                                 (abbreviate-text (or (closure-name func) "lambda"))
                                  (length params) (length args))))
        (let ((call-env (env-extend (closure-env func) params args)))
          (make-tail-call :expr (closure-body func) :env call-env :kind :body))))

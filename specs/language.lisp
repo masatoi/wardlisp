@@ -344,6 +344,30 @@ shallower nesting reads and evaluates."
           ((> levels 1001) (eq type 'wardlisp/src/types:wardlisp-parse-error))
           (t (member type '(nil wardlisp/src/types:wardlisp-parse-error))))))
 
+(defparameter *recursion-shapes*
+  '((:argument . "(define (f n) (if (= n 0) 0 (+ 1 (f (- n 1))))) (f ~D)")
+    (:sequence . "(define (f n) (if (> n 0) (f (- n 1)) 0) n) (f ~D)")
+    (:initializer . "(define (f n) (define y (if (= n 0) 0 (f (- n 1)))) (+ y 1)) (f ~D)")
+    (:tail . "(define (f n) (if (= n 0) 0 (f (- n 1)))) (f ~D)"))
+  "Recursion through an argument, a non-final body expression, a define's
+initializer, and a tail call.")
+
+(defproperty deep-recursion-stays-inside-the-limits
+    ((shape (member :argument :sequence :initializer :tail))
+     (depth (or (range integer 1 300) (range integer 301 100000))))
+  "Section 11.2: however large max-depth is, deep recursion ends in a result or
+in recursion-limit-exceeded, because every evaluation nested on the host stack
+counts towards the expression nesting limit; a tail call nests nothing and
+always succeeds."
+  (:about evaluate)
+  (:kind :invariant)
+  (:trials (:smoke 10 :normal 60))
+  (let ((type (nth-value 2 (run (format nil (cdr (assoc shape *recursion-shapes*)) depth)
+                                :max-depth (expt 10 9) :fuel (expt 10 9)))))
+    (cond ((eq shape :tail) (null type))
+          ((<= depth 300) (null type))
+          (t (member type '(nil wardlisp/src/types:wardlisp-recursion-limit-exceeded))))))
+
 (defproperty float-literals-denote-their-decimal-value
     ((parts float-literal))
   "Section 2.5.2: every float literal shape -- \"12.\", \"12.5\", \".5\", \"12e3\"

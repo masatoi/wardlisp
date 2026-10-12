@@ -40,6 +40,7 @@
     out-of-range-float-literals-are-parse-errors
     non-ascii-digits-are-symbol-characters
     nesting-beyond-the-limit-is-a-parse-error
+    deep-recursion-stays-inside-the-limits
     float-literals-denote-their-decimal-value
     builtins-contain-misuse
     evaluate-contains-malformed-host-arguments
