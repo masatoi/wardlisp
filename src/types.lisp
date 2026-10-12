@@ -161,13 +161,21 @@ so the host can tell dialogue text apart from directive tags."
                             (exec-ctx-cons-count ctx)
                             (exec-ctx-max-cons ctx)))))
 
+(defun abbreviate-number (number)
+  "Return NUMBER in plain decimal for an error message -- ~F for a float, as
+wardlisp prints it, rather than the host's 1.0d20 -- cut to 200 characters with
+\"...\" when longer."
+  (let ((text (if (floatp number) (format nil "~f" number) (format nil "~d" number))))
+    (if (> (length text) 200)
+        (concatenate 'string (subseq text 0 200) "...")
+        text)))
+
 (defun check-integer (ctx value)
   "Check number is within allowed range. Signals integer-limit-exceeded if not.
 Accepts both integers and floats."
   (when (> (abs value) (exec-ctx-max-integer ctx))
     (error 'wardlisp-integer-limit-exceeded
-           ;; ~F prints a float in plain decimal, as wardlisp does, rather than
-           ;; in the host's syntax (1.0d20).
-           :message (format nil "Number ~:[~d~;~f~] exceeds limit ~d"
-                            (floatp value) value (exec-ctx-max-integer ctx))))
+           :message (format nil "Number ~a exceeds limit ~a"
+                            (abbreviate-number value)
+                            (abbreviate-number (exec-ctx-max-integer ctx)))))
   value)

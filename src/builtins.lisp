@@ -87,28 +87,40 @@ condition must not escape the sandbox."
       (error 'wardlisp-integer-limit-exceeded
              :message (format nil "~a: result exceeds the float range" name)))))
 
+(defun checked-reduce (ctx function args initial)
+  "Reduce ARGS with FUNCTION from INITIAL, checking every partial result against
+CTX's max-integer, so a long argument list never builds a number far beyond the
+limit within one step."
+  (let ((result initial))
+    (dolist (a args (check-integer ctx result))
+      (setf result (check-integer ctx (funcall function result a))))))
+
 (defun builtin-add (args ctx)
-  "Built-in + function. Variadic addition."
+  "Built-in + function. Variadic addition.  Each partial sum is checked against
+max-integer."
   (dolist (a args) (ensure-number "+" a))
-  (check-integer ctx (call-checking-float-range
-                      "+" (lambda () (reduce #'+ args :initial-value 0)))))
+  (call-checking-float-range
+   "+" (lambda () (checked-reduce ctx #'+ args 0))))
 
 (defun builtin-sub (args ctx)
-  "Built-in - function. Unary negation or variadic subtraction."
+  "Built-in - function. Unary negation or variadic subtraction.  Each partial
+difference is checked against max-integer."
   (when (null args)
     (error 'wardlisp-arity-error :message "- requires at least 1 argument"))
   (dolist (a args) (ensure-number "-" a))
-  (check-integer ctx (call-checking-float-range
-                      "-" (lambda ()
-                            (if (= 1 (length args))
-                                (- (first args))
-                                (reduce #'- args))))))
+  (call-checking-float-range
+   "-" (lambda ()
+         (if (= 1 (length args))
+             (check-integer ctx (- (first args)))
+             (checked-reduce ctx #'- (rest args) (first args))))))
 
 (defun builtin-mul (args ctx)
-  "Built-in * function. Variadic multiplication."
+  "Built-in * function. Variadic multiplication.  Each partial product is
+checked against max-integer, so (apply * long-list) never multiplies numbers
+far beyond the limit."
   (dolist (a args) (ensure-number "*" a))
-  (check-integer ctx (call-checking-float-range
-                      "*" (lambda () (reduce #'* args :initial-value 1)))))
+  (call-checking-float-range
+   "*" (lambda () (checked-reduce ctx #'* args 1))))
 
 (defun builtin-quotient (args ctx)
   "Built-in quotient function. Integer division (truncate toward zero)."

@@ -90,11 +90,12 @@ Every failure a program can cause is reported as one of WardLisp's own error typ
 | Wall-clock time | 5 seconds | `timeout-exceeded` |
 
 The default fuel of 1,000,000 steps is spent in a few tens of milliseconds by
-typical programs. The work behind one step does not grow with the size of the
-values involved: `equal?` costs a step per pair it compares, `print` stops at
-the output limit, error messages cut values at 200 characters, and list
-operations are bounded by `max-cons` (a program repeating `apply` on long lists
-took about 2.3 seconds for 1,000,000 steps). It does grow with the size of the
+typical programs. The work behind one step is bounded by the limits: `equal?`
+costs a step per pair it compares, `print` stops at the output limit, error
+messages cut values and numbers at 200 characters, list and string operations
+are proportional to at most `max-cons`, and arithmetic checks every partial
+result against `max-integer` (a program repeating `apply` on long lists took
+about 2.3 seconds for 1,000,000 steps). It also grows with the size of the
 program, since looking up a variable scans the bindings in scope. The timeout is
 what bounds wall-clock time.
 

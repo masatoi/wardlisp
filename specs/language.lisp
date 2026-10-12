@@ -257,6 +257,26 @@ value, and integer-limit-exceeded otherwise."
           (eql value expected)
           (eq type 'wardlisp/src/types:wardlisp-integer-limit-exceeded)))))
 
+(defproperty partial-results-respect-max-integer
+    ((a wide-integer)
+     (b wide-integer))
+  "Section 11.4: + and * check every partial result of their arguments, so
+(* a b 0) and (+ a b (- b)) fail with integer-limit-exceeded when the partial
+result a*b or a+b exceeds max-integer, even though the final result would not."
+  (:about evaluate)
+  (:kind :model)
+  (:trials (:smoke 30 :normal 200))
+  (let ((limit (expt 2 64)))
+    (flet ((expect (code partial final)
+             (multiple-value-bind (value metrics type) (run code :max-integer limit)
+               (declare (ignore metrics))
+               (if (and (<= (abs a) limit) (<= (abs b) limit)
+                        (<= (abs partial) limit) (<= (abs final) limit))
+                   (and (null type) (eql value final))
+                   (eq type 'wardlisp/src/types:wardlisp-integer-limit-exceeded)))))
+      (and (expect (format nil "(* ~D ~D 0)" a b) (* a b) 0)
+           (expect (format nil "(+ ~D ~D ~D)" a b (- b)) (+ a b) a)))))
+
 (defproperty lengths-respect-max-integer
     ((size (range integer 0 40))
      (limit (range integer 1 40))

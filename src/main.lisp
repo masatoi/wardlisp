@@ -90,7 +90,8 @@ a number beyond CTX's max-integer."
   "Call THUNK in the host environment evaluation relies on, whatever the caller
 has set.  Reader and printer variables take their standard values (with
 *PRINT-READABLY* false), so neither the meaning of a literal nor the text of an
-error message depends on the caller's *READ-BASE*, readtable or *PRINT-BASE*.
+error message depends on the caller's *READ-BASE*, readtable or *PRINT-BASE*,
+and the caller's *BREAK-ON-SIGNALS* does not apply.
 Floats round to nearest.  Overflow, invalid operation and division by zero
 trap, so they can be classified as wardlisp errors; underflow and inexact do
 not, so a result too small to represent rounds to zero.  The caller's float modes are restored
@@ -101,7 +102,10 @@ afterwards."
            (sb-int:set-floating-point-modes :traps '(:overflow :invalid :divide-by-zero)
                                             :rounding-mode :nearest)
            (with-standard-io-syntax
-             (let ((*print-readably* nil))
+             ;; Errors are signalled and classified inside evaluation; the
+             ;; caller's *BREAK-ON-SIGNALS* must not turn them into breaks.
+             (let ((*print-readably* nil)
+                   (*break-on-signals* nil))
                (funcall thunk))))
       (apply #'sb-int:set-floating-point-modes saved))))
 

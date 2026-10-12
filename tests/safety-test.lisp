@@ -297,6 +297,37 @@ a loop that re-evaluates a wide one is bounded by fuel and does linear work"
 (equal? (build 10001 nil) (build 10001 nil))"
              :max-cons 100000))))
 
+(deftest test-partial-results-respect-max-integer
+  "Section 11.4: a variadic operation checks each partial result, so one step
+never builds a number far beyond max-integer"
+  (flet ((error-type (code)
+           (getf (nth-value 1 (wardlisp:evaluate code :max-integer 1000)) :error-type)))
+    (ok (eq 'wardlisp-integer-limit-exceeded (error-type "(* 100 100 0)")))
+    (ok (eq 'wardlisp-integer-limit-exceeded (error-type "(+ 900 900 -900)")))
+    (ok (null (error-type "(* 10 10 10)")))))
+
+(deftest test-number-limit-messages-are-bounded
+  "integer-limit-exceeded messages cut long numbers like other messages"
+  (dolist (code '("1.5e300" "(* 1e300 1)"
+                  "(define (mk n acc) (if (= n 0) acc (mk (- n 1) (cons 18446744073709551615 acc))))
+(apply * (mk 9000 nil))"))
+    (let ((metrics (nth-value 1 (wardlisp:evaluate code :max-integer (expt 2 64)))))
+      (ok (eq 'wardlisp-integer-limit-exceeded (getf metrics :error-type)))
+      (ok (< (length (getf metrics :error-message)) 450)))))
+
+(deftest test-local-function-defines-are-charged-per-parameter
+  "A body's local function define costs a step per parameter, like lambda"
+  (flet ((steps (code) (getf (nth-value 1 (wardlisp:evaluate code)) :steps-used)))
+    (ok (= 4 (- (steps "(define (h) (define (g a b c d e) 0) 1) (h)")
+                (steps "(define (h) (define (g a) 0) 1) (h)"))))))
+
+(deftest test-evaluate-ignores-host-break-on-signals
+  "The host's *break-on-signals* does not make evaluate break on the errors it
+classifies internally"
+  (let ((*break-on-signals* 'error))
+    (ok (eq 'wardlisp-type-error
+            (getf (nth-value 1 (wardlisp:evaluate "(car 1)")) :error-type)))))
+
 ;; --- Output limit ---
 (deftest test-output-limit
   (ok (signals

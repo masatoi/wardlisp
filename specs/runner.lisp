@@ -36,6 +36,7 @@
     output-limit-is-exact
     integer-arithmetic-agrees-with-common-lisp
     lengths-respect-max-integer
+    partial-results-respect-max-integer
     out-of-range-float-literals-are-parse-errors
     non-ascii-digits-are-symbol-characters
     nesting-beyond-the-limit-is-a-parse-error
@@ -272,8 +273,8 @@ before out-of-range literals were classified."
      (:property evaluate-ignores-host-dynamic-environment))
     (wardlisp/src/builtins::builtin-string-length mutant-builtin-string-length
      (:property lengths-respect-max-integer) (:function-spec evaluate))
-    (wardlisp/src/reader::read-quote mutant-read-quote
-     (:property nesting-beyond-the-limit-is-a-parse-error))
+    (wardlisp/src/builtins::checked-reduce mutant-checked-reduce
+     (:property partial-results-respect-max-integer))
     ;; Last: an unbounded timeout can corrupt the host's timer queue for the
     ;; rest of the process, which would make every later check fail.
     (wardlisp::valid-timeout-p mutant-valid-timeout-p
@@ -345,12 +346,9 @@ caller's reader and printer variables in place."
   (declare (ignore ctx))
   (length (wstring-value (first args))))
 
-(defun mutant-read-quote (input pos &optional (depth 0))
-  "READ-QUOTE that does not count the quote as nesting, so '''...x recurses on
-the host stack without limit."
-  (declare (ignore depth))
-  (multiple-value-bind (expr new-pos) (wardlisp/src/reader::read-expr input pos 0)
-    (values (list "quote" expr) new-pos)))
+(defun mutant-checked-reduce (ctx function args initial)
+  "CHECKED-REDUCE that checks only the final result, as + and * once did."
+  (wardlisp/src/types:check-integer ctx (reduce function args :initial-value initial)))
 
 (defun mutant-valid-timeout-p (timeout)
   "VALID-TIMEOUT-P with neither the NaN guard nor the upper bound."

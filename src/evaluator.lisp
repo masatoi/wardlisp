@@ -339,9 +339,12 @@ Leading define forms are processed with letrec* semantics."
     (if (null defs)
         (eval-sequence exprs env ctx)
         (progn
-          ;; One step per definition, so a body with many leading defines that
-          ;; runs repeatedly costs fuel in proportion to the work it does.
-          (consume-fuel ctx (length defs))
+          ;; One step per definition and per parameter of a function
+          ;; definition, as for lambda, so a body with many or wide leading
+          ;; defines that runs repeatedly costs fuel in proportion to the work.
+          (consume-fuel ctx (loop for form in defs
+                                  for target = (second form)
+                                  sum (1+ (if (consp target) (length (rest target)) 0))))
           (let* ((names (ensure-distinct-define-names defs))
                  (placeholders (make-list (length names)
                                           :initial-element +uninitialized-binding+))
