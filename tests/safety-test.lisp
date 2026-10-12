@@ -405,6 +405,17 @@ normalized double, rounding ties to even."
                (wardlisp:evaluate text))
           text))))
 
+(deftest test-near-halfway-values-round-to-nearest
+  "Values just past the midpoint between two doubles round away from it, both
+as literals and as integer quotients"
+  (ok (eql 18014398509481988.0d0 (wardlisp:evaluate "18014398509481986.5")))
+  (ok (eq t (wardlisp:evaluate "(= 9343749477339329.5 9343749477339330)")))
+  (ok (eql 9007199254740994.0d0 (wardlisp:evaluate "(/ 18014398509481987 2)")))
+  (ok (eql 18014398509481988.0d0
+           (wardlisp:evaluate (format nil "(/ ~D 3)" (+ (* 3 (+ (expt 2 54) 2)) 1)))))
+  ;; An exact tie still goes to even.
+  (ok (eql 18014398509481984.0d0 (wardlisp:evaluate "18014398509481986.0"))))
+
 ;; --- Output limit ---
 (deftest test-output-limit
   (ok (signals

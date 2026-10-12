@@ -94,8 +94,8 @@ typical programs. The work behind one step is bounded by the limits: `equal?`
 costs a step per pair it compares, `print` stops at the output limit, error
 messages cut values and numbers at 200 characters, list and string operations
 are proportional to at most `max-cons`, and arithmetic checks every partial
-result against `max-integer` (a program repeating `apply` on long lists took
-about 2.3 seconds for 1,000,000 steps). It also grows with the size of the
+result against `max-integer` (a program repeating `apply` on long lists took a
+few seconds for 1,000,000 steps, and can reach the default timeout). It also grows with the size of the
 program, since looking up a variable scans the bindings in scope. The timeout is
 what bounds wall-clock time.
 

@@ -63,20 +63,34 @@ type."
         while (ocons-p tail)
         collect (ocons-ocar tail)))
 
-(defun nearest-double (rational)
-  "Return the double-float nearest to RATIONAL, ties to even, subnormals
-included -- SBCL's own conversion truncates in the subnormal range, so this is
-the reference the contracts compare against.  RATIONAL must be within
-double-float range."
-  (let ((magnitude (abs rational)))
-    (sb-int:with-float-traps-masked (:underflow :inexact)
-      (let ((result (cond ((zerop magnitude) 0d0)
-                          ((< magnitude (rational least-positive-normalized-double-float))
-                           (scale-float (coerce (round (* magnitude (expt 2 1074)))
-                                                'double-float)
-                                        -1074))
-                          (t (coerce magnitude 'double-float)))))
-        (if (minusp rational) (- result) result)))))
+(defun adjacent-double (float direction)
+  "Return the double-float next to the non-negative FLOAT, one unit in the last
+place up (DIRECTION 1) or down (-1), by stepping its bit pattern."
+  (let ((bits (+ (logior (ash (ldb (byte 32 0) (sb-kernel:double-float-high-bits float)) 32)
+                         (sb-kernel:double-float-low-bits float))
+                 direction)))
+    (sb-kernel:make-double-float (let ((high (ldb (byte 32 32) bits)))
+                                   (if (logbitp 31 high) (- high (ash 1 32)) high))
+                                 (ldb (byte 32 0) bits))))
+
+(defun nearest-double-p (exact float)
+  "True when FLOAT is the double-float nearest to the rational EXACT, ties to
+even, with EXACT's sign: no adjacent double is strictly closer, and on a tie
+FLOAT's significand is even.  Judged by comparing exact distances to the
+neighbouring doubles, not by converting EXACT, so it is independent of any
+conversion routine."
+  (let* ((magnitude (abs exact))
+         (candidate (abs float))
+         (distance (abs (- magnitude (rational candidate))))
+         (up (abs (- magnitude (rational (adjacent-double candidate 1)))))
+         (down (if (zerop candidate)
+                   up
+                   (abs (- magnitude (rational (adjacent-double candidate -1)))))))
+    (and (or (zerop exact) (eq (minusp exact) (minusp (float-sign float))))
+         (<= distance up)
+         (<= distance down)
+         (or (and (< distance up) (< distance down))
+             (evenp (sb-kernel:double-float-low-bits candidate))))))
 
 (defun wardlisp-number-p (value)
   "True when VALUE is a wardlisp number: an integer or a finite double-float
@@ -441,16 +455,26 @@ one non-ASCII Unicode decimal digit set."
 a point (\"12.\", \"12.5\", \".5\"), digits and an exponent (\"12e3\"), or both
 -- as (TEXT SIGN INTEGER-DIGITS FRACTION-DIGITS EXPONENT), with an exponent
 from -330 to 300 when there is one, so subnormals and underflow to zero are
-reached too."
+reached too.  One shape in five writes as its integer part a midpoint between
+two doubles 4 apart (from 2^54 to 2^55) with a short fraction, so values at and
+just past a midpoint are drawn."
   (let* ((sign (random-element '("" "+" "-")))
-         (shape (random 4))
-         (integer-digits (if (= shape 2) "" (random-digits (1+ (random 4)))))
+         (shape (random 5))
+         (integer-digits (case shape
+                           (2 "")
+                           ;; A midpoint between two doubles 4 apart.
+                           (4 (format nil "~D" (+ (expt 2 54) (* 4 (random (expt 2 52))) 2)))
+                           (t (random-digits (1+ (random 4))))))
          (fraction-digits (case shape
                             (0 "")
                             ((1 2) (random-digits (1+ (random 4))))
+                            (4 (random-digits (1+ (random 3))))
                             (t "")))
          (point (if (= shape 3) "" "."))
-         (exponent (if (or (= shape 3) (zerop (random 2))) (- (random 631) 330) nil)))
+         (exponent (case shape
+                     (3 (- (random 631) 330))
+                     (4 nil)
+                     (t (if (zerop (random 2)) (- (random 631) 330) nil)))))
     (list (format nil "~A~A~A~A~@[e~D~]" sign integer-digits point fraction-digits exponent)
           sign integer-digits fraction-digits exponent)))
 

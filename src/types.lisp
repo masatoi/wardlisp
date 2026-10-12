@@ -38,7 +38,7 @@
    #:+uninitialized-binding+
    ;; Helpers
    #:consume-fuel #:track-depth #:track-expr-depth #:track-cons #:check-integer
-   #:abbreviate-text))
+   #:abbreviate-text #:rational-to-double))
 (in-package :wardlisp/src/types)
 
 ;;; --- Custom cons cell for allocation counting ---
@@ -167,6 +167,33 @@ timeout-exceeded once EVALUATE's timer has marked the deadline as passed."
                             (exec-ctx-cons-count ctx)
                             (exec-ctx-max-cons ctx)))))
 
+(defun rational-to-double (rational)
+  "Return the double-float nearest to RATIONAL, ties to even, subnormals
+included, or NIL when it is beyond double-float range.  Computed exactly:
+SBCL's own conversion ignores the bits below the rounding point, so a value just
+past a midpoint can round the wrong way."
+  (when (zerop rational)
+    (return-from rational-to-double 0d0))
+  (let* ((magnitude (abs rational))
+         ;; E such that 2^52 <= MAGNITUDE / 2^E < 2^53; the estimate from the
+         ;; integer lengths is off by at most one either way.
+         (e (- (integer-length (numerator magnitude))
+               (integer-length (denominator magnitude))
+               53)))
+    (loop while (>= (* magnitude (expt 2 (- e))) (expt 2 53)) do (incf e))
+    (loop while (< (* magnitude (expt 2 (- e))) (expt 2 52)) do (decf e))
+    ;; Below the normal range the spacing stays 2^-1074.
+    (setf e (max e -1074))
+    (let ((significand (round (* magnitude (expt 2 (- e))))))
+      (when (= significand (expt 2 53))
+        (setf significand (expt 2 52)
+              e (1+ e)))
+      (when (> e 971)
+        (return-from rational-to-double nil))
+      (let ((result (sb-int:with-float-traps-masked (:underflow :inexact)
+                      (scale-float (coerce significand 'double-float) e))))
+        (if (minusp rational) (- result) result)))))
+
 (defun abbreviate-text (text)
   "Return TEXT, a name or token for an error message, cut to 200 characters with
 \"...\" when longer."
@@ -176,9 +203,14 @@ timeout-exceeded once EVALUATE's timer has marked the deadline as passed."
 
 (defun abbreviate-number (number)
   "Return NUMBER in plain decimal for an error message -- ~F for a float, as
-wardlisp prints it, rather than the host's 1.0d20 -- cut to 200 characters with
-\"...\" when longer."
-  (abbreviate-text (if (floatp number) (format nil "~f" number) (format nil "~d" number))))
+wardlisp prints it, rather than the host's 1.0d20.  An integer of more than
+about 200 digits is described by its approximate number of digits instead, so
+that building the message does not cost as much as printing the number."
+  (cond ((floatp number) (abbreviate-text (format nil "~f" number)))
+        ((> (integer-length number) 660)
+         (format nil "~:[~;-~]<an integer of about ~d digits>"
+                 (minusp number) (ceiling (* (integer-length number) (log 2d0 10)))))
+        (t (format nil "~d" number))))
 
 (defun check-integer (ctx value)
   "Check number is within allowed range. Signals integer-limit-exceeded if not.

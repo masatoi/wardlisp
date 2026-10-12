@@ -143,11 +143,12 @@ for another second, a second timer signals SANDBOX-DEADLINE-REACHED to stop it."
 
 (defun timeout-message (timeout)
   "Return the error message for an evaluation stopped after TIMEOUT seconds."
-  (format nil "Evaluation timed out after ~a second~:[s~;~]"
-          (describe-value (if (rationalp timeout)
-                              (if (integerp timeout) timeout (float timeout 1d0))
-                              timeout))
-          (eql timeout 1)))
+  (cond ((integerp timeout)
+         (format nil "Evaluation timed out after ~d second~:p" timeout))
+        ((< timeout 1/1000)
+         "Evaluation timed out after less than 0.001 seconds")
+        (t (format nil "Evaluation timed out after ~a seconds"
+                   (describe-value (float timeout 1d0))))))
 
 (defun evaluate-in-sandbox (code fuel max-depth max-cons max-output max-integer timeout
                             random-seed bindings)

@@ -42,6 +42,7 @@
     nesting-beyond-the-limit-is-a-parse-error
     deep-recursion-stays-inside-the-limits
     float-literals-denote-their-decimal-value
+    integer-division-rounds-to-nearest
     builtins-contain-misuse
     evaluate-contains-malformed-host-arguments
     float-overflow-is-a-number-limit
@@ -274,6 +275,9 @@ before out-of-range literals were classified."
      (:property evaluate-ignores-host-dynamic-environment))
     (wardlisp/src/builtins::builtin-string-length mutant-builtin-string-length
      (:property lengths-respect-max-integer) (:function-spec evaluate))
+    (wardlisp/src/types:rational-to-double mutant-rational-to-double
+     (:property float-literals-denote-their-decimal-value)
+     (:property integer-division-rounds-to-nearest))
     (wardlisp/src/builtins::checked-reduce mutant-checked-reduce
      (:property partial-results-respect-max-integer))
     ;; Last: an unbounded timeout can corrupt the host's timer queue for the
@@ -350,6 +354,13 @@ caller's reader and printer variables in place."
 (defun mutant-checked-reduce (ctx function args initial)
   "CHECKED-REDUCE that checks only the final result, as + and * once did."
   (wardlisp/src/types:check-integer ctx (reduce function args :initial-value initial)))
+
+(defun mutant-rational-to-double (rational)
+  "RATIONAL-TO-DOUBLE that uses the host's conversion, which ignores the bits
+below the rounding point."
+  (handler-case (sb-int:with-float-traps-masked (:underflow :inexact)
+                  (coerce rational 'double-float))
+    (floating-point-overflow () nil)))
 
 (defun mutant-valid-timeout-p (timeout)
   "VALID-TIMEOUT-P with neither the NaN guard nor the upper bound."

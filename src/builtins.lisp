@@ -153,7 +153,9 @@ divisible, otherwise returns float."
                               ;; quotient beyond the float range overflows,
                               ;; not an operand.
                               (if (and (integerp a) (integerp b))
-                                  (coerce (cl:/ a b) 'double-float)
+                                  (or (rational-to-double (cl:/ a b))
+                                      (error 'wardlisp-integer-limit-exceeded
+                                             :message "/: result exceeds the float range"))
                                   (coerce (cl:/ (coerce a 'double-float)
                                                 (coerce b 'double-float))
                                           'double-float))))))))

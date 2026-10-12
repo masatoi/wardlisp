@@ -388,9 +388,27 @@ of a literal that rounds to zero kept."
       (multiple-value-bind (value metrics) (run text :max-integer (expt 10 400))
         (and (succeeded-p metrics)
              (typep value 'double-float)
-             (eql value (let ((nearest (nearest-double exact)))
-                          ;; A literal that rounds to zero keeps its sign.
-                          (if (and (zerop nearest) (string= sign "-")) -0.0d0 nearest))))))))
+             (nearest-double-p exact value)
+             ;; A literal that rounds to zero keeps its sign.
+             (or (not (zerop value))
+                 (eq (string= sign "-") (minusp (float-sign value)))))))))
+
+(defproperty integer-division-rounds-to-nearest
+    ((quotient (range integer 18014398509481984 36028797018963967))
+     (divisor (range integer 3 30))
+     (remainder-numerator (range integer 1 1000)))
+  "Section 7.1: / on two integers that do not divide converts the exact
+quotient to the nearest double-float, ties to even.  The quotients lie between
+2^54 and 2^55, where doubles are 4 apart, and have a fractional part, so many
+lie just past a midpoint."
+  (:about evaluate)
+  (:kind :model)
+  (:trials (:smoke 30 :normal 300))
+  (let* ((remainder (1+ (mod remainder-numerator (1- divisor))))
+         (dividend (+ (* quotient divisor) remainder))
+         (value (run (format nil "(/ ~D ~D)" dividend divisor))))
+    (and (typep value 'double-float)
+         (nearest-double-p (/ dividend divisor) value))))
 
 (defun misuse-arities (arity)
   "Return the argument counts to try for a builtin of ARITY: the right ones and

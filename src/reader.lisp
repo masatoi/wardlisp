@@ -200,21 +200,8 @@ beyond double-float range."
     (let ((magnitude (+ exponent (length (princ-to-string mantissa)) -1)))
       (cond ((> magnitude 309) (out-of-range))
             ((< magnitude -400) (return-from decimal-to-double 0.0d0))))
-    (let ((value (* mantissa (expt 10 exponent))))
-      (sb-int:with-float-traps-masked (:underflow :inexact :overflow)
-        (let ((result
-                (if (< value (rational least-positive-normalized-double-float))
-                    ;; Subnormal: a multiple of 2^-1074, rounded half to even
-                    ;; by ROUND, then scaled exactly.
-                    (scale-float (coerce (round (* value (expt 2 1074))) 'double-float)
-                                 -1074)
-                    ;; The host's conversion signals overflow in software,
-                    ;; whatever the traps.
-                    (handler-case (coerce value 'double-float)
-                      (floating-point-overflow () (out-of-range))))))
-          (when (sb-ext:float-infinity-p result)
-            (out-of-range))
-          result)))))
+    (or (rational-to-double (* mantissa (expt 10 exponent)))
+        (out-of-range))))
 
 (defun ascii-digit-p (ch)
   "Is CH one of the ASCII digits 0-9?  Other Unicode decimal digits are ordinary

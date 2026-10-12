@@ -124,7 +124,7 @@ and without trailing zeros after the point beyond the one digit kept."
   (let ((exact (decimal-text-value text))
         (fraction (subseq text (1+ (or (position #\. text) -1)))))
     (and exact
-         (= value (nearest-double exact))
+         (nearest-double-p exact value)
          (or (= (length fraction) 1)
              (char/= #\0 (char fraction (1- (length fraction))))))))
 
