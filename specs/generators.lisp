@@ -92,6 +92,28 @@ conversion routine."
          (or (and (< distance up) (< distance down))
              (evenp (sb-kernel:double-float-low-bits candidate))))))
 
+(defun integer-nearest-double (integer)
+  "Return the double-float nearest to INTEGER, ties to even, or NIL beyond
+double-float range.  Computed independently of any float conversion: the
+integer is rounded to 53 significant bits by integer arithmetic, after which
+converting it is exact."
+  (let* ((magnitude (abs integer))
+         (shift (max 0 (- (integer-length magnitude) 53)))
+         (rounded (* (round magnitude (expt 2 shift)) (expt 2 shift))))
+    (when (< rounded (expt 2 1024))
+      (let ((float (coerce rounded 'double-float)))
+        (if (minusp integer) (- float) float)))))
+
+(defgenerator tie-integer ()
+  "An integer from 2^63 to 2^100 that lies exactly on, or one unit past, the
+midpoint between two doubles."
+  (let* ((shift (+ 11 (random 37)))
+         (significand (+ (expt 2 52) (random (expt 2 52))))
+         (midpoint (+ (* significand (expt 2 shift)) (expt 2 (1- shift)))))
+    (+ midpoint (random 2))))
+
+(defspec midpoint-integer integer (:generator tie-integer))
+
 (defun wardlisp-number-p (value)
   "True when VALUE is a wardlisp number: an integer or a finite double-float
 (sections 3.1 and 3.2).  Ratios, complexes, other floats, infinities and NaNs

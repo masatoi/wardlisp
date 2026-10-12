@@ -38,7 +38,7 @@
    #:+uninitialized-binding+
    ;; Helpers
    #:consume-fuel #:track-depth #:track-expr-depth #:track-cons #:check-integer
-   #:abbreviate-text #:rational-to-double))
+   #:abbreviate-text #:rational-to-double #:call-with-subnormals-kept))
 (in-package :wardlisp/src/types)
 
 ;;; --- Custom cons cell for allocation counting ---
@@ -166,6 +166,22 @@ timeout-exceeded once EVALUATE's timer has marked the deadline as passed."
            :message (format nil "Cons allocation ~d exceeds limit ~d"
                             (exec-ctx-cons-count ctx)
                             (exec-ctx-max-cons ctx)))))
+
+(defun call-with-subnormals-kept (thunk)
+  "Call THUNK with the CPU's flush-to-zero and denormals-are-zero modes off, so
+subnormal floats are computed and read as themselves whatever the host has set,
+and restore the host's modes afterwards.  (MXCSR bits 15 and 6 on x86-64; other
+platforms keep their modes.)"
+  #+x86-64
+  (let ((saved (sb-vm:floating-point-modes)))
+    (unwind-protect
+         (progn
+           (setf (sb-vm:floating-point-modes)
+                 (logandc2 saved (logior (ash 1 15) (ash 1 6))))
+           (funcall thunk))
+      (setf (sb-vm:floating-point-modes) saved)))
+  #-x86-64
+  (funcall thunk))
 
 (defun rational-to-double (rational)
   "Return the double-float nearest to RATIONAL, ties to even, subnormals

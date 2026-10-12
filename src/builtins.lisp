@@ -87,13 +87,33 @@ condition must not escape the sandbox."
       (error 'wardlisp-integer-limit-exceeded
              :message (format nil "~a: result exceeds the float range" name)))))
 
+(defun exact-float (number)
+  "Return NUMBER as a double-float: a float as it is, an integer as the nearest
+double, ties to even (the host's conversion rounds some ties the wrong way).
+An integer beyond double-float range is integer-limit-exceeded."
+  (if (floatp number)
+      number
+      (or (rational-to-double number)
+          (error 'wardlisp-integer-limit-exceeded
+                 :message "Number exceeds the float range"))))
+
+(defun mixed-operands (a b)
+  "Return A and B ready for one arithmetic operation: when one is a float, the
+other is converted with EXACT-FLOAT, as the host's float contagion would but
+correctly rounded."
+  (if (or (floatp a) (floatp b))
+      (values (exact-float a) (exact-float b))
+      (values a b)))
+
 (defun checked-reduce (ctx function args initial)
   "Reduce ARGS with FUNCTION from INITIAL, checking every partial result against
 CTX's max-integer, so a long argument list never builds a number far beyond the
-limit within one step."
+limit within one step.  An integer meeting a float is converted with
+EXACT-FLOAT first."
   (let ((result initial))
     (dolist (a args (check-integer ctx result))
-      (setf result (check-integer ctx (funcall function result a))))))
+      (multiple-value-bind (x y) (mixed-operands result a)
+        (setf result (check-integer ctx (funcall function x y)))))))
 
 (defun builtin-add (args ctx)
   "Built-in + function. Variadic addition.  Each partial sum is checked against
@@ -156,9 +176,7 @@ divisible, otherwise returns float."
                                   (or (rational-to-double (cl:/ a b))
                                       (error 'wardlisp-integer-limit-exceeded
                                              :message "/: result exceeds the float range"))
-                                  (coerce (cl:/ (coerce a 'double-float)
-                                                (coerce b 'double-float))
-                                          'double-float))))))))
+                                  (cl:/ (exact-float a) (exact-float b)))))))))
 
 ;;; --- Comparison ---
 
@@ -402,8 +420,9 @@ to max-integer like any other number."
 ;;; --- Value printing ---
 
 (defun format-float (value)
-  "Format a float for wardlisp output. Removes trailing zeros but keeps at least one decimal."
-  (let ((s (format nil "~f" value)))
+  "Format a float for wardlisp output. Removes trailing zeros but keeps at least one decimal.
+A subnormal prints as itself whatever flush-to-zero modes the host has set."
+  (let ((s (call-with-subnormals-kept (lambda () (format nil "~f" value)))))
     (let ((dot-pos (position #\. s)))
       (if dot-pos
           (let ((end (length s)))

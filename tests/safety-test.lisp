@@ -416,6 +416,37 @@ as literals and as integer quotients"
   ;; An exact tie still goes to even.
   (ok (eql 18014398509481984.0d0 (wardlisp:evaluate "18014398509481986.0"))))
 
+(deftest test-mixed-arithmetic-converts-integers-to-nearest
+  "An integer meeting a float is converted to the nearest double, ties to even,
+as a literal of the same value is"
+  (let ((tie (+ (expt 2 63) 1024)))
+    (dolist (code (list (format nil "(+ ~D 0.0)" tie) (format nil "(* ~D 1.0)" tie)
+                        (format nil "(- ~D 0.0)" tie) (format nil "(/ ~D 1.0)" tie)))
+      (ok (eql (expt 2d0 63) (wardlisp:evaluate code)) code))))
+
+(deftest test-evaluate-ignores-host-flush-to-zero
+  "Subnormal results do not depend on the host's flush-to-zero and
+denormals-are-zero bits, which are restored afterwards"
+  #+x86-64
+  (let ((saved (sb-vm:floating-point-modes))
+        (code "(list (* 1e-160 1e-160) (+ 1e-320 0.0) (* 1e-320 1.0))"))
+    (let ((expected (wardlisp:print-value (wardlisp:evaluate code))))
+      (unwind-protect
+           (progn
+             (setf (sb-vm:floating-point-modes)
+                   (logior (sb-vm:floating-point-modes) (ash 1 15) (ash 1 6)))
+             ;; Both the values and print-value, called from the host, ignore
+             ;; the host's bits.
+             (ok (equal expected (wardlisp:print-value (wardlisp:evaluate code))))
+             ;; Judged by bits: under the host's modes PLUSP would read the
+             ;; subnormal as zero.
+             (ok (plusp (sb-kernel:double-float-low-bits
+                         (wardlisp:ocons-ocar (wardlisp:evaluate code)))))
+             (ok (logbitp 15 (sb-vm:floating-point-modes)) "the host's bits are restored"))
+        (setf (sb-vm:floating-point-modes) saved))))
+  #-x86-64
+  (skip "flush-to-zero bits are checked on x86-64 only"))
+
 ;; --- Output limit ---
 (deftest test-output-limit
   (ok (signals

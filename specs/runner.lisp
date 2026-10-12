@@ -43,6 +43,7 @@
     deep-recursion-stays-inside-the-limits
     float-literals-denote-their-decimal-value
     integer-division-rounds-to-nearest
+    mixed-arithmetic-rounds-integers-to-nearest
     builtins-contain-misuse
     evaluate-contains-malformed-host-arguments
     float-overflow-is-a-number-limit
@@ -278,6 +279,8 @@ before out-of-range literals were classified."
     (wardlisp/src/types:rational-to-double mutant-rational-to-double
      (:property float-literals-denote-their-decimal-value)
      (:property integer-division-rounds-to-nearest))
+    (wardlisp/src/builtins::exact-float mutant-exact-float
+     (:property mixed-arithmetic-rounds-integers-to-nearest))
     (wardlisp/src/builtins::checked-reduce mutant-checked-reduce
      (:property partial-results-respect-max-integer))
     ;; Last: an unbounded timeout can corrupt the host's timer queue for the
@@ -361,6 +364,11 @@ below the rounding point."
   (handler-case (sb-int:with-float-traps-masked (:underflow :inexact)
                   (coerce rational 'double-float))
     (floating-point-overflow () nil)))
+
+(defun mutant-exact-float (number)
+  "EXACT-FLOAT that converts an integer with the host's float contagion, which
+rounds some ties the wrong way."
+  (coerce number 'double-float))
 
 (defun mutant-valid-timeout-p (timeout)
   "VALID-TIMEOUT-P with neither the NaN guard nor the upper bound."

@@ -94,22 +94,29 @@ has set.  Reader and printer variables take their standard values (with
 *PRINT-READABLY* false), so neither the meaning of a literal nor the text of an
 error message depends on the caller's *READ-BASE*, readtable or *PRINT-BASE*,
 and the caller's *BREAK-ON-SIGNALS* does not apply.
-Floats round to nearest.  Overflow, invalid operation and division by zero
-trap, so they can be classified as wardlisp errors; underflow and inexact do
-not, so a result too small to represent rounds to zero.  The caller's float modes are restored
-afterwards."
-  (let ((saved (sb-int:get-floating-point-modes)))
+Floats round to nearest, and subnormals are neither flushed to zero nor read as
+zero, whatever flush-to-zero or denormals-are-zero bits the host has set.
+Overflow, invalid operation and division by zero trap, so they can be
+classified as wardlisp errors; underflow and inexact do not, so a result too
+small to represent rounds to zero.  The caller's float modes, every bit of
+them, are restored afterwards."
+  (let ((saved (sb-vm:floating-point-modes)))
     (unwind-protect
          (progn
            (sb-int:set-floating-point-modes :traps '(:overflow :invalid :divide-by-zero)
                                             :rounding-mode :nearest)
+           ;; MXCSR bit 15 flushes subnormal results to zero and bit 6 reads
+           ;; subnormal operands as zero; SET-FLOATING-POINT-MODES leaves them.
+           #+x86-64
+           (setf (sb-vm:floating-point-modes)
+                 (logandc2 (sb-vm:floating-point-modes) (logior (ash 1 15) (ash 1 6))))
            (with-standard-io-syntax
              ;; Errors are signalled and classified inside evaluation; the
              ;; caller's *BREAK-ON-SIGNALS* must not turn them into breaks.
              (let ((*print-readably* nil)
                    (*break-on-signals* nil))
                (funcall thunk))))
-      (apply #'sb-int:set-floating-point-modes saved))))
+      (setf (sb-vm:floating-point-modes) saved))))
 
 (defun invalid-argument (message)
   "Return EVALUATE's two values for an argument refused with MESSAGE."

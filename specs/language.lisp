@@ -126,7 +126,8 @@ source fragments; run with max-integer 1000.")
     ((code program-text)
      (seed (range integer 0 1000)))
   "Sections 1 and 13.1: what a program means does not depend on the host's
-reader and printer variables, readtable, floating-point traps or rounding mode.
+reader and printer variables, readtable, floating-point traps, rounding mode or
+flush-to-zero modes.
 Under unusual host settings the program, a fixed float probe whose result
 depends on rounding, and *MESSAGE-PROBES*, whose error messages print numbers,
 floats and source, give the same results and metrics as under standard ones,
@@ -138,17 +139,23 @@ and the host's float modes are as they were afterwards."
            (multiple-value-bind (value metrics) (run code :fuel 5000 :random-seed seed)
              (list (print-value value) metrics
                    (print-value (run "(list (/ 1 3) (* 1.1 1.1) (/ 2.0 3.0))"))
+                   ;; Subnormal results, which flush-to-zero modes would zero.
+                   (print-value (run "(list (* 1e-160 1e-160) (+ 1e-320 0.0) 4.9e-324)"))
                    (mapcar (lambda (probe) (nth-value 1 (run probe :max-integer 1000)))
                            *message-probes*)
                    ;; Messages about host arguments name their host type.
                    (nth-value 1 (run 42))
                    (nth-value 1 (run "1" :bindings '((x . 1))))))))
     (let ((expected (both))
-          (saved (sb-int:get-floating-point-modes)))
+          (saved (sb-vm:floating-point-modes)))
       (unwind-protect
            (progn
              (sb-int:set-floating-point-modes :traps *hostile-host-traps*
                                               :rounding-mode :positive-infinity)
+             ;; Flush-to-zero and denormals-are-zero (MXCSR bits 15 and 6).
+             #+x86-64
+             (setf (sb-vm:floating-point-modes)
+                   (logior (sb-vm:floating-point-modes) (ash 1 15) (ash 1 6)))
              (let ((actual (let ((*read-base* 16)
                                  (*read-default-float-format* 'double-float)
                                  (*print-base* 16)
@@ -162,8 +169,10 @@ and the host's float modes are as they were afterwards."
                    (modes (sb-int:get-floating-point-modes)))
                (and (equal actual expected)
                     (null (set-exclusive-or (getf modes :traps) *hostile-host-traps*))
-                    (eq :positive-infinity (getf modes :rounding-mode)))))
-        (apply #'sb-int:set-floating-point-modes saved)))))
+                    (eq :positive-infinity (getf modes :rounding-mode))
+                    #+x86-64 (logbitp 15 (sb-vm:floating-point-modes))
+                    #+x86-64 (logbitp 6 (sb-vm:floating-point-modes)))))
+        (setf (sb-vm:floating-point-modes) saved)))))
 
 ;;; --- Resource limits (section 11) ---
 
@@ -410,6 +419,27 @@ lie just past a midpoint."
     (and (typep value 'double-float)
          (nearest-double-p (/ dividend divisor) value))))
 
+(defproperty mixed-arithmetic-rounds-integers-to-nearest
+    ((integer midpoint-integer)
+     (operator (member :add :subtract :multiply :divide))
+     (float (member "0.0" "1.0" "2.5" "-0.75")))
+  "Sections 2.5.2 and 7.1: an integer meeting a float is converted to the
+nearest double-float, ties to even, as a literal of the same value is, and the
+operation is then carried out on the two doubles."
+  (:about evaluate)
+  (:kind :model)
+  (:trials (:smoke 30 :normal 300))
+  (let* ((function (ecase operator (:add #'+) (:subtract #'-) (:multiply #'*) (:divide #'/)))
+         (other (wardlisp-read float))
+         (expected (and (not (and (eq operator :divide) (zerop other)))
+                        (funcall function (integer-nearest-double integer) other)))
+         (name (ecase operator (:add "+") (:subtract "-") (:multiply "*") (:divide "/")))
+         (value (run (format nil "(~A ~D ~A)" name integer float)
+                     :max-integer (expt 10 40))))
+    (if expected
+        (eql value expected)
+        t)))
+
 (defun misuse-arities (arity)
   "Return the argument counts to try for a builtin of ARITY: the right ones and
 one too many and too few where that is possible."
@@ -547,7 +577,7 @@ the range."
             ((< exact (/ bound 2))
              (and (null type)
                   (typep value 'double-float)
-                  (eql value (funcall function (coerce big 'double-float) other))))
+                  (eql value (funcall function (integer-nearest-double big) other))))
             ((> exact (* bound 2))
              (eq type 'wardlisp/src/types:wardlisp-integer-limit-exceeded))
             (t (member type '(nil wardlisp/src/types:wardlisp-integer-limit-exceeded)))))))
