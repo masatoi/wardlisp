@@ -15,7 +15,7 @@
                 #:symbol-value-p #:number-value-p
                 #:wardlisp-type-error)
   (:import-from :wardlisp/src/types
-                #:make-ocons #:wstring-p #:wstring-value)
+                #:make-ocons #:wstring-p #:wstring-value #:closure-p #:builtin-p)
   (:import-from :wardlisp/src/reader
                 #:wardlisp-read)
   (:export #:contract-names

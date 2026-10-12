@@ -39,7 +39,7 @@ WardLisp is a Lisp-1 (like Scheme: functions and variables share a single namesp
 - **Lists**: `cons`, `car`, `cdr`, `list`, `null?`, `atom?`, `length`, `append`
 - **Equality**: `eq?` (shallow), `equal?` (deep structural)
 - **Strings**: `string-append`, `number->string`, `string-length`
-- **Other**: `not`, `print`
+- **Other**: `not`, `print`, `random`
 
 ### Strings
 
@@ -73,7 +73,7 @@ Tail calls in supported positions (if branches, let/begin body, cond clauses, an
 
 ### What's Intentionally Missing
 
-No macros, no mutation (`set!`/`setf`), no loops, no `eval`, no I/O, no packages, no reader macros, no FFI, no threads, no randomness.
+No macros, no mutation (`set!`/`setf`), no loops, no `eval`, no I/O, no packages, no reader macros, no FFI, no threads, and no randomness beyond `(random n)`, which is reproducible under `evaluate`'s `:random-seed`.
 
 ## Resource Limits
 

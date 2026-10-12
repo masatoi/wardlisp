@@ -152,16 +152,27 @@ the decoded length at +max-string-length+."
           (t lower))))
 
 (defun parse-float-token (token)
-  "Read TOKEN, which FLOAT-TOKEN-P accepted, as a double-float.  A literal
-beyond double-float range is a wardlisp-parse-error: the host reader's own error
-must not escape the sandbox."
-  (handler-case
-      (let ((*read-default-float-format* 'double-float)
-            (*read-eval* nil))
-        (read-from-string token))
-    ((or reader-error arithmetic-error) ()
+  "Read TOKEN, which FLOAT-TOKEN-P accepted, as a double-float.  The host reader
+runs under standard syntax, so the host's reader variables and readtable cannot
+change what a literal means.  A literal beyond double-float range is a
+wardlisp-parse-error: the host reader's own error must not escape the sandbox."
+  (let ((value (handler-case
+                   (with-standard-io-syntax
+                     (let ((*read-default-float-format* 'double-float)
+                           (*read-eval* nil))
+                       (read-from-string token)))
+                 ((or reader-error arithmetic-error) ()
+                   (error 'wardlisp-parse-error
+                          :message (format nil "Float literal out of range: ~a" token))))))
+    (unless (typep value 'double-float)
       (error 'wardlisp-parse-error
-             :message (format nil "Float literal out of range: ~a" token)))))
+             :message (format nil "Malformed float literal: ~a" token)))
+    value))
+
+(defun ascii-digit-p (ch)
+  "Is CH one of the ASCII digits 0-9?  Other Unicode decimal digits are ordinary
+symbol characters (section 15 of docs/language-spec.md)."
+  (char<= #\0 ch #\9))
 
 (defun integer-token-p (token)
   "Check if TOKEN looks like an integer."
@@ -169,7 +180,7 @@ must not escape the sandbox."
                         (or (char= (char token 0) #\-) (char= (char token 0) #\+)))
                    1
                    0)))
-    (and (> (length token) start) (every #'digit-char-p (subseq token start)))))
+    (and (> (length token) start) (every #'ascii-digit-p (subseq token start)))))
 
 (defun float-token-p (token)
   "Check if TOKEN looks like a floating-point number (e.g., 3.14, -0.5, .5, 1e3, 2.5e-10)."
@@ -187,7 +198,7 @@ must not escape the sandbox."
       (loop while (< i len)
             for ch = (char token i)
             do (cond
-                 ((digit-char-p ch)
+                 ((ascii-digit-p ch)
                   (setf has-digit t)
                   (incf i))
                  ((and (char= ch #\.) (not has-dot) (not has-e))

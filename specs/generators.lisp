@@ -63,10 +63,15 @@ type."
         while (ocons-p tail)
         collect (ocons-ocar tail)))
 
+(defun wardlisp-number-p (value)
+  "True when VALUE is a wardlisp number: an integer or a double-float (sections
+3.1 and 3.2).  Ratios, complexes and other floats are not wardlisp values."
+  (or (integerp value) (typep value 'double-float)))
+
 (defun wardlisp-datum-p (value)
   "True when VALUE is a wardlisp data value: a number, T, NIL, a symbol (a bare
 CL string), a boxed string, or a proper list of data values."
-  (or (numberp value)
+  (or (wardlisp-number-p value)
       (eq value t)
       (null value)
       (stringp value)
@@ -74,6 +79,22 @@ CL string), a boxed string, or a proper list of data values."
       (and (ocons-p value)
            (proper-ocons-list-p value)
            (every #'wardlisp-datum-p (ocons-elements value)))))
+
+(defun wardlisp-value-p (value)
+  "True when VALUE is a value a wardlisp program can produce (section 3): a
+number, T, NIL, a symbol, a boxed string, a closure, a builtin, or a pair whose
+car and cdr are such values.  No other host object may come out of EVALUATE."
+  (let ((pending (list value)))
+    (loop while pending
+          do (let ((item (pop pending)))
+               (cond ((ocons-p item)
+                      (push (ocons-ocar item) pending)
+                      (push (ocons-ocdr item) pending))
+                     ((not (or (wardlisp-number-p item) (eq item t) (null item)
+                               (stringp item) (wstring-p item)
+                               (closure-p item) (builtin-p item)))
+                      (return-from wardlisp-value-p nil)))))
+    t))
 
 (defun datum-numbers (value)
   "Return every number reachable from the data VALUE."
@@ -128,23 +149,34 @@ with a letter, and never the reserved t or nil."
 its printed form stays well inside the reader's 100-character literal limit."
   (/ (- (random 2000001) 1000000) 1000d0))
 
+(defun random-wide-float ()
+  "Return a nonzero double-float whose decimal exponent is uniform from -300 to
+300, of either sign."
+  (* (if (zerop (random 2)) 1 -1)
+     (+ 1 (random 9d0))
+     (expt 10d0 (- (random 601) 300))))
+
 (defun wardlisp-list (items)
   "Return the proper ocons list of ITEMS."
   (reduce (lambda (item tail) (make-ocons item tail)) items
           :from-end t :initial-value nil))
 
-(defun random-datum (&key (depth 2) (floats t))
+(defun random-datum (&key (depth 2) (floats t) wide-floats)
   "Return a random wardlisp data value nested at most DEPTH lists deep.  With
-FLOATS false no float is generated."
+FLOATS false no float is generated; with WIDE-FLOATS floats range over
+magnitudes from 1e-300 to 1e300 instead of staying within 1000."
   (ecase (random (if (plusp depth) 8 7))
     (0 (random-integer))
-    (1 (if floats (random-float) (random-integer)))
+    (1 (cond ((not floats) (random-integer))
+             (wide-floats (random-wide-float))
+             (t (random-float))))
     ((2 3) (random-symbol-name))
     (4 (make-string-value (random-text)))
     (5 t)
     (6 nil)
     (7 (wardlisp-list (loop repeat (random 4)
-                            collect (random-datum :depth (1- depth) :floats floats))))))
+                            collect (random-datum :depth (1- depth) :floats floats
+                                                  :wide-floats wide-floats))))))
 
 (defun copy-datum (value)
   "Return a structurally equal copy of the data VALUE that shares no ocons cell,
@@ -163,24 +195,37 @@ for symbols and lists, the printed form itself for self-evaluating atoms."
 
 ;;; --- Random programs ---
 
-(defparameter *program-templates*
-  '("(define (count n) (if (= n 0) 0 (+ 1 (count (- n 1))))) (count ~D)"
-    "(define (build n acc) (if (= n 0) acc (build (- n 1) (cons n acc))))
-(length (build ~D nil))"
-    "(define (shout n) (if (= n 0) 'done (begin (print n) (shout (- n 1)))))
-(shout ~D)"
-    "(define (echo xs) (if (null? xs) 'done (begin (print (car xs)) (echo (cdr xs)))))
-(echo (list ~D \"hi\" 'sym (list 1 \"a\\nb\")))"
-    "(define (grow n s) (if (= n 0) (string-length s) (grow (- n 1) (string-append s \"ab\"))))
-(grow ~D \"\")"
-    "(define (fact n) (if (= n 0) 1 (* n (fact (- n 1))))) (fact ~D)"
-    "(define (spin n) (spin n)) (spin ~D)"
-    "(let* ((n ~D) (xs (list n (random 10) (random 100)))) (apply + xs))"
-    "(define (fib n) (if (< n 2) n (+ (fib (- n 1)) (fib (- n 2))))) (fib ~D)"
-    "(define (square-up x n) (if (= n 0) x (square-up (* x x) (- n 1))))
-(square-up 1.5e10 ~D)")
-  "Deterministic programs that use recursion, allocation, output, big numbers
-and non-termination; each takes one integer.")
+(defparameter *named-templates*
+  '((:count . "(define (count n) (if (= n 0) 0 (+ 1 (count (- n 1))))) (count ~D)")
+    (:build . "(define (build n acc) (if (= n 0) acc (build (- n 1) (cons n acc))))
+(length (build ~D nil))")
+    (:shout . "(define (shout n) (if (= n 0) 'done (begin (print n) (shout (- n 1)))))
+(shout ~D)")
+    (:echo . "(define (echo xs) (if (null? xs) 'done (begin (print (car xs)) (echo (cdr xs)))))
+(echo (list ~D \"hi\" 'sym (list 1 \"a\\nb\")))")
+    (:grow . "(define (grow n s) (if (= n 0) (string-length s) (grow (- n 1) (string-append s \"ab\"))))
+(grow ~D \"\")")
+    (:fact . "(define (fact n) (if (= n 0) 1 (* n (fact (- n 1))))) (fact ~D)")
+    (:spin . "(define (spin n) (spin n)) (spin ~D)")
+    (:dice . "(let* ((n ~D) (xs (list n (random 10) (random 100)))) (apply + xs))")
+    (:fib . "(define (fib n) (if (< n 2) n (+ (fib (- n 1)) (fib (- n 2))))) (fib ~D)")
+    (:square-up . "(define (square-up x n) (if (= n 0) x (square-up (* x x) (- n 1))))
+(square-up 1.5e10 ~D)"))
+  "Programs that use recursion, allocation, output, big numbers, randomness and
+non-termination, by name; each takes one integer.")
+
+(defparameter *program-templates* (mapcar #'cdr *named-templates*)
+  "The templates of *NAMED-TEMPLATES*.")
+
+(defparameter *limit-programs*
+  '((:steps-used (:count 1 20) (:build 2 20) (:shout 1 20) (:echo 1 20) (:grow 1 20)
+     (:fact 1 20) (:fib 2 10))
+    (:cons-allocated (:build 2 20) (:grow 1 20) (:echo 1 20))
+    (:max-depth-reached (:count 1 20) (:fact 1 20) (:fib 2 10))
+    (:output (:shout 1 20) (:echo 1 20)))
+  "For each resource, (TEMPLATE LOW HIGH) entries whose programs succeed with
+fuel 20000 and the default limits for every argument from LOW to HIGH, and use
+at least two units of that resource.")
 
 (defparameter *expression-operators*
   '("+" "-" "*" "/" "quotient" "mod" "=" "<" ">=" "list" "cons" "car" "cdr"
@@ -192,7 +237,9 @@ and non-termination; each takes one integer.")
   '("(" ")" "(" ")" "'" "\"" "\"s\"" "define" "lambda" "let" "if" "cond" "f" "x"
     "1" "-3" "2.5" "#" ":" ";" "\\" "nil" "t" "print" "+" "car" "cons" "." "0"
     "1e400" "-1.5e309" ".5e400" "1e-400" "1e308" "99999999999999999999999"
-    "#.(quit)" "cl:car")
+    "#.(quit)" "cl:car"
+    ;; Unicode decimal digits are symbol characters, never digits.
+    "１.５" "１２" "٣.٥" "２e3" "'１.５")
   "Tokens, broken pieces and forbidden syntax that token soup is made of.")
 
 (defun random-template-program ()
@@ -226,12 +273,12 @@ program without RANDOM, or a random expression without RANDOM."
         unless (search "random" program)
           return program))
 
-(defun resource-program ()
-  "Return a template program without RANDOM over a small argument, so that it
-usually terminates and uses some steps, cells, call depth and output."
-  (loop for template = (random-element *program-templates*)
-        unless (search "random" template)
-          return (format nil template (1+ (random 20)))))
+(defun limit-program (resource)
+  "Return a program from *LIMIT-PROGRAMS* that succeeds and uses at least two
+units of RESOURCE, so that the limit properties never hold vacuously."
+  (destructuring-bind (name low high)
+      (random-element (rest (assoc resource *limit-programs*)))
+    (format nil (cdr (assoc name *named-templates*)) (+ low (random (1+ (- high low)))))))
 
 ;;; --- Generators and named specs ---
 
@@ -267,11 +314,36 @@ values drawn independently."
 
 (defspec deterministic-program-text string (:generator terminating-program))
 
-(defgenerator limit-program ()
-  "Program text that usually terminates while using every counted resource."
-  (resource-program))
+(defgenerator step-hungry-program ()
+  "A program that succeeds and uses at least two steps."
+  (limit-program :steps-used))
 
-(defspec resource-program-text string (:generator limit-program))
+(defspec step-using-program string (:generator step-hungry-program))
+
+(defgenerator cons-hungry-program ()
+  "A program that succeeds and allocates at least two cells."
+  (limit-program :cons-allocated))
+
+(defspec cons-using-program string (:generator cons-hungry-program))
+
+(defgenerator depth-hungry-program ()
+  "A program that succeeds and reaches call depth two or more."
+  (limit-program :max-depth-reached))
+
+(defspec depth-using-program string (:generator depth-hungry-program))
+
+(defgenerator output-hungry-program ()
+  "A program that succeeds and prints at least two characters."
+  (limit-program :output))
+
+(defspec output-using-program string (:generator output-hungry-program))
+
+(defgenerator wide-datum ()
+  "A wardlisp data value whose floats range over magnitudes from 1e-300 to
+1e300, so their printed forms run from a few characters to hundreds."
+  (random-datum :wide-floats t))
+
+(defspec printable-datum (satisfies wardlisp-datum-p) (:generator wide-datum))
 
 (defgenerator symbol-text ()
   "A symbol name the reader reads back as itself."
@@ -308,6 +380,23 @@ exponent from 309 to 2000, of either sign."
           (- (random 601) 300)))
 
 (defspec wide-float-literal string (:generator wide-float-text))
+
+(defparameter *non-ascii-zeros* '(#xFF10 #x0660 #x06F0 #x0966 #x09E6 #x0E50)
+  "Code points of the digit zero of some Unicode decimal digit sets: fullwidth,
+Arabic-Indic, Extended Arabic-Indic, Devanagari, Bengali and Thai.")
+
+(defgenerator non-ascii-number-text ()
+  "A token shaped like an integer or a float literal whose digits all come from
+one non-ASCII Unicode decimal digit set."
+  (let ((zero (random-element *non-ascii-zeros*)))
+    (flet ((digits (count)
+             (coerce (loop repeat count collect (code-char (+ zero (random 10)))) 'string)))
+      (ecase (random 3)
+        (0 (digits (1+ (random 4))))
+        (1 (format nil "~A.~A" (digits (1+ (random 3))) (digits (1+ (random 3)))))
+        (2 (format nil "~Ae~A" (digits (1+ (random 2))) (digits 1)))))))
+
+(defspec non-ascii-number-token string (:generator non-ascii-number-text))
 
 (defgenerator evaluate-arguments ()
   "A whole EVALUATE call: a program and every resource limit, small enough that

@@ -24,7 +24,7 @@ spec-symbol(symbol: "wardlisp:evaluate")
 spec-check(function: "wardlisp:evaluate", trials: 200)
 spec-check(symbol: "wardlisp:evaluate")
 
-;; Lint (before commit; the same globs CI would run)
+;; Lint (before commit; CI does not run mallet, so this is the only check)
 mallet src/*.lisp specs/*.lisp scripts/*.lisp
 ```
 

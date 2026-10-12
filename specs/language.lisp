@@ -63,41 +63,112 @@ downcased name, and t and nil cannot be bound."
                       (nth-value 2 (run "1" :bindings (list (cons reserved value))))))
                 '("t" "nil" "T" "NIL")))))
 
-(defproperty evaluate-is-deterministic
-    ((code deterministic-program-text)
-     (seed (range integer 0 1000)))
-  "Section 1 (determinism): the same program under the same limits and seed
-gives the same result and the same metrics."
+(defproperty evaluate-checks-bound-numbers
+    ((value (or (range integer -100000 100000) (member 1/3 -5/2 #C(1 2) 2.5f0 1.5d0 -7.25d0)))
+     (limit (range integer 1 1000)))
+  "Section 17.9: a number injected through :BINDINGS must be an integer or a
+double-float (sections 3.1 and 3.2) -- any other number is a type-error -- and
+is subject to max-integer like any other number (section 11.4)."
   (:about evaluate)
   (:kind :invariant)
-  (:trials (:smoke 20 :normal 100))
+  (:trials (:smoke 20 :normal 200))
+  (multiple-value-bind (seen metrics type)
+      (run "x" :bindings (list (cons "x" value)) :max-integer limit)
+    (declare (ignore metrics))
+    (cond ((not (wardlisp-number-p value))
+           (eq type 'wardlisp/src/types:wardlisp-type-error))
+          ((> (abs value) limit)
+           (eq type 'wardlisp/src/types:wardlisp-integer-limit-exceeded))
+          (t (and (null type) (eql seen value))))))
+
+(defproperty evaluate-is-deterministic
+    ((code program-text)
+     (seed (range integer 0 1000)))
+  "Section 1 (determinism) and 7.4 (random): the same program under the same
+limits and :RANDOM-SEED gives the same result and the same metrics, programs
+that call random included."
+  (:about evaluate)
+  (:kind :invariant)
+  (:trials (:smoke 20 :normal 200))
   (multiple-value-bind (first first-metrics) (run code :fuel 5000 :random-seed seed)
     (multiple-value-bind (second second-metrics) (run code :fuel 5000 :random-seed seed)
       (and (equal (print-value first) (print-value second))
            (equal first-metrics second-metrics)))))
 
+(defproperty seeded-random-is-reproducible
+    ((bound (range integer 1 1000000))
+     (seed (range integer 0 100000)))
+  "Sections 7.4 and 13.1: (random N) gives an integer from 0 below N, and the
+same :RANDOM-SEED gives the same sequence in every evaluation."
+  (:about evaluate)
+  (:kind :invariant)
+  (:trials (:smoke 20 :normal 200))
+  (let ((code (format nil "(list ~{(random ~D)~^ ~})" (make-list 6 :initial-element bound))))
+    (multiple-value-bind (first metrics) (run code :random-seed seed)
+      (and (succeeded-p metrics)
+           (equal (print-value first) (print-value (run code :random-seed seed)))
+           (every (lambda (n) (and (integerp n) (<= 0 n) (< n bound)))
+                  (ocons-elements first))))))
+
+(defparameter *hostile-host-traps* '(:overflow :invalid :divide-by-zero :underflow)
+  "Float traps unlike the ones wardlisp runs under: underflow traps too.")
+
+(defproperty evaluate-ignores-host-dynamic-environment
+    ((code program-text)
+     (seed (range integer 0 1000)))
+  "Sections 1 and 2: what a program means does not depend on the host's reader
+variables, readtable or floating-point traps.  Under unusual host settings it
+gives the same result and metrics as under standard ones, and the host's float
+traps are as they were afterwards."
+  (:about evaluate)
+  (:kind :invariant)
+  (:trials (:smoke 20 :normal 200))
+  (multiple-value-bind (expected expected-metrics) (run code :fuel 5000 :random-seed seed)
+    (let ((saved (sb-int:get-floating-point-modes)))
+      (unwind-protect
+           (progn
+             (sb-int:set-floating-point-modes :traps *hostile-host-traps*)
+             (multiple-value-bind (actual actual-metrics)
+                 (let ((*read-base* 16)
+                       (*read-default-float-format* 'single-float)
+                       (*print-base* 16)
+                       (*print-radix* t)
+                       (*print-case* :downcase)
+                       (*readtable* (copy-readtable nil)))
+                   (set-macro-character #\1 (lambda (stream char)
+                                              (declare (ignore stream char))
+                                              :host-macro))
+                   (run code :fuel 5000 :random-seed seed))
+               (and (equal (print-value actual) (print-value expected))
+                    (equal actual-metrics expected-metrics)
+                    (null (set-exclusive-or
+                           (getf (sb-int:get-floating-point-modes) :traps)
+                           *hostile-host-traps*)))))
+        (apply #'sb-int:set-floating-point-modes saved)))))
+
 ;;; --- Resource limits (section 11) ---
 
 (defun limit-is-tight-p (code metrics-key option error-type)
-  "Run CODE unconstrained, read the amount of METRICS-KEY it used, and check
-section 11's rule for the limit OPTION: a run with exactly that limit behaves as
-the unconstrained one, and one less stops it with ERROR-TYPE.  Vacuously true
-when the program fails anyway, or uses too little for a smaller limit to be a
-valid argument."
+  "Run CODE with generous fuel and default limits, read the amount of
+METRICS-KEY it used, and check section 11's rule for the limit OPTION: a run
+with exactly that limit behaves as the generous one, and one less stops it with
+ERROR-TYPE.  CODE comes from *LIMIT-PROGRAMS*, so the generous run must succeed
+and use at least two units; anything else fails the check rather than passing
+it vacuously."
   (multiple-value-bind (value metrics) (run code :fuel 20000)
     (let ((used (if (eq metrics-key :output)
                     (length (getf metrics :output))
                     (getf metrics metrics-key))))
-      (or (not (succeeded-p metrics))
-          (< used 2)
-          (multiple-value-bind (exact exact-metrics) (run code :fuel 20000 option used)
-            (and (succeeded-p exact-metrics)
-                 (equal (print-value exact) (print-value value))
-                 (eq error-type
-                     (nth-value 2 (run code :fuel 20000 option (1- used))))))))))
+      (and (succeeded-p metrics)
+           (>= used 2)
+           (multiple-value-bind (exact exact-metrics) (run code :fuel 20000 option used)
+             (and (succeeded-p exact-metrics)
+                  (equal (print-value exact) (print-value value))
+                  (eq error-type
+                      (nth-value 2 (run code :fuel 20000 option (1- used))))))))))
 
 (defproperty step-limit-is-exact
-    ((code resource-program-text))
+    ((code step-using-program))
   "Section 11.1: a program that needs N steps runs with fuel N, using it up
 exactly, and stops with step-limit-exceeded with fuel N - 1."
   (:about evaluate)
@@ -105,17 +176,17 @@ exactly, and stops with step-limit-exceeded with fuel N - 1."
   (:trials (:smoke 20 :normal 100))
   (multiple-value-bind (value metrics) (run code :fuel 20000)
     (let ((steps (getf metrics :steps-used)))
-      (or (not (succeeded-p metrics))
-          (< steps 2)
-          (multiple-value-bind (exact exact-metrics) (run code :fuel steps)
-            (and (succeeded-p exact-metrics)
-                 (zerop (getf exact-metrics :fuel-remaining))
-                 (equal (print-value exact) (print-value value))
-                 (eq 'wardlisp/src/types:wardlisp-step-limit-exceeded
-                     (nth-value 2 (run code :fuel (1- steps))))))))))
+      (and (succeeded-p metrics)
+           (>= steps 2)
+           (multiple-value-bind (exact exact-metrics) (run code :fuel steps)
+             (and (succeeded-p exact-metrics)
+                  (zerop (getf exact-metrics :fuel-remaining))
+                  (equal (print-value exact) (print-value value))
+                  (eq 'wardlisp/src/types:wardlisp-step-limit-exceeded
+                      (nth-value 2 (run code :fuel (1- steps))))))))))
 
 (defproperty memory-limit-is-exact
-    ((code resource-program-text))
+    ((code cons-using-program))
   "Section 11.3: a program that allocates N cells runs with max-cons N and
 stops with memory-limit-exceeded with max-cons N - 1."
   (:about evaluate)
@@ -125,7 +196,7 @@ stops with memory-limit-exceeded with max-cons N - 1."
                     'wardlisp/src/types:wardlisp-memory-limit-exceeded))
 
 (defproperty recursion-limit-is-exact
-    ((code resource-program-text))
+    ((code depth-using-program))
   "Section 11.2: a program that reaches call depth N runs with max-depth N and
 stops with recursion-limit-exceeded with max-depth N - 1."
   (:about evaluate)
@@ -135,7 +206,7 @@ stops with recursion-limit-exceeded with max-depth N - 1."
                     'wardlisp/src/types:wardlisp-recursion-limit-exceeded))
 
 (defproperty output-limit-is-exact
-    ((code resource-program-text))
+    ((code output-using-program))
   "Section 11.5: a program that prints N characters runs with max-output N and
 stops with output-limit-exceeded with max-output N - 1."
   (:about evaluate)
@@ -181,6 +252,20 @@ parse-error wherever it appears, however large max-integer is."
                 (:argument (format nil "(+ 1 ~A)" literal)))))
     (eq 'wardlisp/src/types:wardlisp-parse-error
         (nth-value 2 (run code :max-integer (expt 10 1000))))))
+
+(defproperty non-ascii-digits-are-symbol-characters
+    ((token non-ascii-number-token))
+  "Sections 2.6 and 15: only the ASCII digits 0-9 are digits, so a token made of
+other Unicode decimal digits is a symbol: unquoted it is an undefined name,
+quoted it evaluates to that symbol."
+  (:about evaluate)
+  (:kind :invariant)
+  (:trials (:smoke 20 :normal 100))
+  (multiple-value-bind (quoted metrics) (run (format nil "'~A" token))
+    (and (succeeded-p metrics)
+         (symbol-value-p quoted)
+         (string= quoted (string-downcase token))
+         (eq 'wardlisp/src/types:wardlisp-name-error (nth-value 2 (run token))))))
 
 (defproperty float-overflow-is-a-number-limit
     ((left wide-float-literal)

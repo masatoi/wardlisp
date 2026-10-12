@@ -126,6 +126,27 @@
   ;; The largest finite literal still reads
   (ok (floatp (wardlisp-read "1.7976931348623157e308"))))
 
+(deftest test-non-ascii-digits-are-symbol-characters
+  "Only ASCII 0-9 are digits (section 15); other Unicode digits make a symbol"
+  (let ((fullwidth-float (format nil "~C.~C" (code-char #xFF11) (code-char #xFF15)))
+        (fullwidth-integer (format nil "~C~C" (code-char #xFF11) (code-char #xFF12)))
+        (arabic-indic (format nil "~C.~C" (code-char #x0663) (code-char #x0665))))
+    (ok (equal fullwidth-float (wardlisp-read fullwidth-float)))
+    (ok (equal fullwidth-integer (wardlisp-read fullwidth-integer)))
+    (ok (equal arabic-indic (wardlisp-read arabic-indic)))
+    (ok (equal (list "+" fullwidth-integer) (wardlisp-read (format nil "(+ ~A)" fullwidth-integer))))))
+
+(deftest test-reader-ignores-host-reader-settings
+  "Numeric literals read the same whatever the host's reader variables are"
+  (let ((*read-base* 16)
+        (*read-default-float-format* 'single-float)
+        (*readtable* (copy-readtable nil)))
+    (set-macro-character #\1 (lambda (stream char) (declare (ignore stream char)) :injected))
+    (ok (eql 100000.0d0 (wardlisp-read "1e5")))
+    (ok (eql 1.5d0 (wardlisp-read "1.5")))
+    (ok (eql 10 (wardlisp-read "10")))
+    (ok (signals (wardlisp-read "1e400") 'wardlisp-parse-error))))
+
 ;;; --- String literals ---
 
 (deftest test-read-string-basic

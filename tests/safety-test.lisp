@@ -73,6 +73,63 @@ max-integer is larger than any double-float"
     (let ((metrics (nth-value 1 (wardlisp:evaluate (car case) :max-integer (expt 10 1000)))))
       (ok (eq (cdr case) (getf metrics :error-type)) (car case)))))
 
+(defun call-with-host-float-traps (traps thunk)
+  "Call THUNK with the host's float traps set to TRAPS, restoring them after."
+  (let ((saved (sb-int:get-floating-point-modes)))
+    (unwind-protect
+         (progn (sb-int:set-floating-point-modes :traps traps)
+                (funcall thunk))
+      (apply #'sb-int:set-floating-point-modes saved))))
+
+(deftest test-evaluate-ignores-host-float-traps
+  "EVALUATE pins its own float modes: an underflow rounds to zero and an overflow
+is integer-limit-exceeded whatever traps the host has enabled"
+  (let ((huge (expt 10 1000)))
+    (flet ((outcome (code)
+             (multiple-value-bind (value metrics) (wardlisp:evaluate code :max-integer huge)
+               (list value (getf metrics :error-type))))
+           (host-traps () (getf (sb-int:get-floating-point-modes) :traps)))
+      (dolist (traps '((:overflow :invalid :divide-by-zero :underflow) (:invalid) ()))
+        (let ((before (host-traps))
+              (label (format nil "host traps ~S" traps)))
+          (call-with-host-float-traps
+           traps
+           (lambda ()
+             (ok (equal '(0.0d0 nil) (outcome "(* 1e-300 1e-300)")) label)
+             (ok (equal '(0.0d0 nil) (outcome "1e-400")) label)
+             (ok (equal '(nil wardlisp-integer-limit-exceeded) (outcome "(* 1e300 1e300)"))
+                 label)
+             (ok (equal (sort (copy-list traps) #'string<)
+                        (sort (copy-list (host-traps)) #'string<))
+                 "the host's traps are restored")))
+          (ok (equal before (host-traps))))))))
+
+(deftest test-evaluate-ignores-host-reader-settings
+  "The host's reader and printer variables do not change what a program means
+or how its errors are reported"
+  (let ((standard (nth-value 1 (wardlisp:evaluate "(* 99999 99999)" :max-integer 1000))))
+    (let ((*print-base* 16) (*print-radix* t))
+      (ok (equal standard
+                 (nth-value 1 (wardlisp:evaluate "(* 99999 99999)" :max-integer 1000))))))
+  (let ((*read-base* 16))
+    (ok (eql 100000.0d0 (wardlisp:evaluate "1e5")))
+    (ok (eq 'wardlisp-parse-error
+            (getf (nth-value 1 (wardlisp:evaluate "(+ 1e400 0)")) :error-type)))))
+
+(deftest test-bindings-accept-only-wardlisp-numbers
+  "Bound numbers must be integers or double-floats within max-integer"
+  (flet ((bound-error (value &rest options)
+           (getf (nth-value 1 (apply #'wardlisp:evaluate "x"
+                                     :bindings (list (cons "x" value)) options))
+                 :error-type)))
+    (ok (null (bound-error 42)))
+    (ok (null (bound-error 2.5d0)))
+    (ok (eq 'wardlisp-type-error (bound-error 1/3)))
+    (ok (eq 'wardlisp-type-error (bound-error #C(1 2))))
+    (ok (eq 'wardlisp-type-error (bound-error 2.5f0)))
+    (ok (eq 'wardlisp-integer-limit-exceeded (bound-error 1000 :max-integer 10)))
+    (ok (eq 'wardlisp-integer-limit-exceeded (bound-error -1000.0d0 :max-integer 10)))))
+
 ;; --- Output limit ---
 (deftest test-output-limit
   (ok (signals

@@ -21,16 +21,19 @@
 
 (defun valid-binding-value-p (value)
   "True if VALUE is a value the host may inject via EVALUATE's :bindings."
-  ;; Atoms only: number, t, nil, symbol (CL string), or boxed string. Compound
-  ;; ocons values are rejected -- the public API exports no ocons constructor and
-  ;; their contents would be unvalidated host objects.
-  (or (numberp value) (eq value t) (null value)
+  ;; Atoms only: integer, double-float, t, nil, symbol (CL string), or boxed
+  ;; string. Other CL numbers (ratios, complexes, single-floats) are not
+  ;; wardlisp values, and compound ocons values are rejected -- the public API
+  ;; exports no ocons constructor and their contents would be unvalidated host
+  ;; objects.
+  (or (integerp value) (typep value 'double-float) (eq value t) (null value)
       (stringp value) (wstring-p value)))
 
-(defun build-binding-frame (bindings)
+(defun build-binding-frame (bindings ctx)
   "Validate BINDINGS, an alist of (\"name\" . value), and return an environment
 frame. Names are downcased to match reader symbol normalization. Signals
-wardlisp-type-error on malformed input."
+wardlisp-type-error on malformed input, and wardlisp-integer-limit-exceeded for
+a number beyond CTX's max-integer."
   (unless (listp bindings)
     (error 'wardlisp-type-error :message "evaluate: :bindings must be an alist"))
   (let ((frame nil))
@@ -50,72 +53,63 @@ wardlisp-type-error on malformed input."
         (unless (valid-binding-value-p value)
           (error 'wardlisp-type-error
                  :message (format nil ":bindings: unsupported value for ~a" name)))
+        (when (numberp value)
+          (check-integer ctx value))
         (push (cons (string-downcase name) value) frame)))))
 
-(defun evaluate (code &key (fuel 1000000) (max-depth 100) (max-cons 10000)
-                      (max-output 1000) (max-integer (expt 2 64)) (timeout 5)
-                      (random-seed nil) (bindings nil))
-  "Evaluate CODE string in the restricted Lisp.
-Returns (values result metrics-plist).
-On error, returns (values nil metrics-plist) with :error-type and :error-message.
-Note: NIL is a valid successful result.  Always check :error-type to distinguish
-success from failure.
+(defun call-with-sandbox-host-environment (thunk)
+  "Call THUNK in the host environment evaluation relies on, whatever the caller
+has set.  Reader and printer variables take their standard values (with
+*PRINT-READABLY* false), so neither the meaning of a literal nor the text of an
+error message depends on the caller's *READ-BASE*, readtable or *PRINT-BASE*.
+Overflow, invalid operation and division by zero trap, so they can be
+classified as wardlisp errors; underflow and inexact do not, so a result too
+small to represent rounds to zero.  The caller's float modes are restored
+afterwards."
+  (let ((saved (sb-int:get-floating-point-modes)))
+    (unwind-protect
+         (progn
+           (sb-int:set-floating-point-modes :traps '(:overflow :invalid :divide-by-zero))
+           (with-standard-io-syntax
+             (let ((*print-readably* nil))
+               (funcall thunk))))
+      (apply #'sb-int:set-floating-point-modes saved))))
 
-If RANDOM-SEED is a non-negative integer, calls to (random N) within this
-evaluation produce a deterministic sequence reproducible across calls.
-When RANDOM-SEED is NIL (default), the process-global *random-state* is used
-directly so each call advances the shared state and consecutive evaluations
-produce independent random sequences.
+(defun invalid-argument (message)
+  "Return EVALUATE's two values for an argument refused with MESSAGE."
+  (values nil (make-metrics nil :error-type 'wardlisp-type-error :error-message message)))
 
-BINDINGS, when supplied, is an alist of (\"name\" . value) entries injected into
-the initial environment before evaluation, so scene code can reference
-host-provided reader flags. Names are downcased; values may be numbers, t, nil,
-symbols (bare strings), or boxed strings (see MAKE-STRING-VALUE)."
+(defun evaluate-in-sandbox (code fuel max-depth max-cons max-output max-integer timeout
+                            random-seed bindings)
+  "Do EVALUATE's work, inside CALL-WITH-SANDBOX-HOST-ENVIRONMENT."
   ;; Validate inputs before creating execution context
   (unless (stringp code)
-    (return-from evaluate
-      (values nil (make-metrics nil
-                   :error-type 'wardlisp-type-error
-                   :error-message (format nil "evaluate: expected string, got ~a"
-                                          (let ((tp (type-of code)))
-                                            (if (consp tp) (car tp) tp)))))))
+    (return-from evaluate-in-sandbox
+      (invalid-argument (format nil "evaluate: expected string, got ~a"
+                                (let ((tp (type-of code)))
+                                  (if (consp tp) (car tp) tp))))))
   (unless (and (integerp fuel) (plusp fuel))
-    (return-from evaluate
-      (values nil (make-metrics nil
-                   :error-type 'wardlisp-type-error
-                   :error-message "evaluate: :fuel must be a positive integer"))))
+    (return-from evaluate-in-sandbox
+      (invalid-argument "evaluate: :fuel must be a positive integer")))
   (unless (and (integerp max-depth) (plusp max-depth))
-    (return-from evaluate
-      (values nil (make-metrics nil
-                   :error-type 'wardlisp-type-error
-                   :error-message "evaluate: :max-depth must be a positive integer"))))
+    (return-from evaluate-in-sandbox
+      (invalid-argument "evaluate: :max-depth must be a positive integer")))
   (unless (and (integerp max-cons) (plusp max-cons))
-    (return-from evaluate
-      (values nil (make-metrics nil
-                   :error-type 'wardlisp-type-error
-                   :error-message "evaluate: :max-cons must be a positive integer"))))
+    (return-from evaluate-in-sandbox
+      (invalid-argument "evaluate: :max-cons must be a positive integer")))
   (unless (and (integerp max-output) (plusp max-output))
-    (return-from evaluate
-      (values nil (make-metrics nil
-                   :error-type 'wardlisp-type-error
-                   :error-message "evaluate: :max-output must be a positive integer"))))
+    (return-from evaluate-in-sandbox
+      (invalid-argument "evaluate: :max-output must be a positive integer")))
   (unless (and (integerp max-integer) (plusp max-integer))
-    (return-from evaluate
-      (values nil (make-metrics nil
-                   :error-type 'wardlisp-type-error
-                   :error-message "evaluate: :max-integer must be a positive integer"))))
+    (return-from evaluate-in-sandbox
+      (invalid-argument "evaluate: :max-integer must be a positive integer")))
   (unless (and (realp timeout) (plusp timeout))
-    (return-from evaluate
-      (values nil (make-metrics nil
-                   :error-type 'wardlisp-type-error
-                   :error-message "evaluate: :timeout must be a positive number"))))
+    (return-from evaluate-in-sandbox
+      (invalid-argument "evaluate: :timeout must be a positive number")))
   (unless (or (null random-seed)
               (and (integerp random-seed) (not (minusp random-seed))))
-    (return-from evaluate
-      (values nil (make-metrics nil
-                   :error-type 'wardlisp-type-error
-                   :error-message
-                   "evaluate: :random-seed must be a non-negative integer or NIL"))))
+    (return-from evaluate-in-sandbox
+      (invalid-argument "evaluate: :random-seed must be a non-negative integer or NIL")))
   ;; Context is created after validation, bound outside handler-case
   ;; so error handlers can access metrics and output
   (let ((ctx (make-exec-ctx :fuel fuel :max-depth max-depth :max-cons max-cons
@@ -124,7 +118,7 @@ symbols (bare strings), or boxed strings (see MAKE-STRING-VALUE)."
              (handler-case
                  (sb-ext:with-timeout timeout
                    (let* ((program (wardlisp/src/reader:wardlisp-read-program code))
-                          (frame (build-binding-frame bindings))
+                          (frame (build-binding-frame bindings ctx))
                           (env (make-initial-env))
                           (result (progn (setf (first env) frame)
                                          (eval-program program env ctx))))
@@ -153,6 +147,34 @@ symbols (bare strings), or boxed strings (see MAKE-STRING-VALUE)."
           (let ((*random-state* (sb-ext:seed-random-state random-seed)))
             (run-evaluate))
           (run-evaluate)))))
+
+(defun evaluate (code &key (fuel 1000000) (max-depth 100) (max-cons 10000)
+                      (max-output 1000) (max-integer (expt 2 64)) (timeout 5)
+                      (random-seed nil) (bindings nil))
+  "Evaluate CODE string in the restricted Lisp.
+Returns (values result metrics-plist).
+On error, returns (values nil metrics-plist) with :error-type and :error-message.
+Note: NIL is a valid successful result.  Always check :error-type to distinguish
+success from failure.
+
+If RANDOM-SEED is a non-negative integer, calls to (random N) within this
+evaluation produce a deterministic sequence reproducible across calls.
+When RANDOM-SEED is NIL (default), the process-global *random-state* is used
+directly so each call advances the shared state and consecutive evaluations
+produce independent random sequences.
+
+BINDINGS, when supplied, is an alist of (\"name\" . value) entries injected into
+the initial environment before evaluation, so scene code can reference
+host-provided reader flags. Names are downcased; values may be integers,
+double-floats (within MAX-INTEGER), t, nil, symbols (bare strings), or boxed
+strings (see MAKE-STRING-VALUE).
+
+The result does not depend on the caller's reader and printer variables or
+floating-point traps (see CALL-WITH-SANDBOX-HOST-ENVIRONMENT)."
+  (call-with-sandbox-host-environment
+   (lambda ()
+     (evaluate-in-sandbox code fuel max-depth max-cons max-output max-integer timeout
+                          random-seed bindings))))
 
 (defun make-metrics (ctx &key error-type error-message)
   "Build metrics plist from execution context.  CTX may be nil if context creation itself failed."

@@ -61,7 +61,10 @@ jobs:
       # checkout; this keeps a second copy off the search path to begin with.
       - name: No other wardlisp is installed
         run: |
-          ! ls -d "$HOME"/.roswell/local-projects/*/wardlisp 2>/dev/null
+          for dir in "$HOME"/.roswell/local-projects/wardlisp \
+                     "$HOME"/.roswell/local-projects/*/wardlisp; do
+            if [ -e "$dir" ]; then echo "another wardlisp is installed: $dir"; exit 1; fi
+          done
 
       - name: Check the specification with fixed seeds
         run: |

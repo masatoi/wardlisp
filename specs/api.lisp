@@ -26,6 +26,12 @@ error types; INTERNAL-ERROR means a host condition escaped the sandbox's
 classification, which is a defect of the implementation."
   (not (eq (getf metrics :error-type) 'wardlisp/src/types:wardlisp-internal-error)))
 
+(defun result-is-wardlisp-value-p (value metrics)
+  "Sections 1 and 3: a successful run returns a wardlisp value, never a host
+object such as a CL symbol, ratio or complex."
+  (or (getf metrics :error-type)
+      (wardlisp-value-p value)))
+
 (defun fuel-accounted-p (metrics fuel)
   "Section 11.1: every step consumed is taken from FUEL, so steps used and fuel
 remaining always add up to the fuel given."
@@ -80,6 +86,7 @@ not part of it."
   (:post-values (value metrics)
     (error-report-consistent-p value metrics)
     (host-errors-contained-p metrics)
+    (result-is-wardlisp-value-p value metrics)
     (fuel-accounted-p metrics fuel)
     (output-within-limit-p metrics max-output)
     (success-within-limits-p metrics fuel max-depth max-cons)
@@ -89,16 +96,36 @@ not part of it."
 ;;; --- print-value (sections 10, 17.3) ---
 
 (defun reads-back-as-p (text value)
-  "True when the wardlisp reader reads TEXT back as an atom equal to VALUE."
+  "True when the wardlisp reader reads TEXT back as a string equal to the string
+VALUE."
   (let ((read (wardlisp-read text)))
-    (cond ((wstring-p value)
-           (and (wstring-p read) (string= (wstring-value read) (wstring-value value))))
-          ((numberp value) (and (numberp read) (= read value)))
-          (t nil))))
+    (and (wstring-p read) (string= (wstring-value read) (wstring-value value)))))
+
+(defun decimal-text-value (text)
+  "Return the exact rational the plain decimal TEXT denotes -- an optional minus
+sign, one or more ASCII digits, a point, one or more ASCII digits -- or NIL when
+TEXT is not of that form."
+  (let* ((negative (and (plusp (length text)) (char= #\- (char text 0))))
+         (body (if negative (subseq text 1) text))
+         (point (position #\. body)))
+    (when (and point
+               (plusp point)
+               (< (1+ point) (length body))
+               (every (lambda (ch) (char<= #\0 ch #\9)) (remove #\. body :count 1)))
+      (let ((digits (subseq body (1+ point))))
+        (* (if negative -1 1)
+           (+ (parse-integer body :end point)
+              (/ (parse-integer digits) (expt 10 (length digits)))))))))
+
+(defun denotes-float-p (text value)
+  "Section 10: TEXT is a plain decimal fraction, with at least one digit after
+the point and no exponent, whose exact value rounds to the double-float VALUE."
+  (let ((exact (decimal-text-value text)))
+    (and exact (= value (float exact 1d0)))))
 
 (defspec-function print-value
   "Every data value prints as the text section 10 and 17.3 give for its type."
-  (:args (value wardlisp-datum))
+  (:args (value printable-datum))
   (:cases
     (:integer
      "An integer prints in decimal."
@@ -106,12 +133,11 @@ not part of it."
      (:returns string)
      (:post (string= result (format nil "~D" value))))
     (:float
-     "A float prints as a decimal fraction with a point, and reads back."
+     "A float prints as a decimal fraction with a point and no exponent, denoting
+the float's value."
      (:when (floatp value))
      (:returns string)
-     (:post (find #\. result)
-            (not (find #\e result :test #'char-equal))
-            (reads-back-as-p result value)))
+     (:post (denotes-float-p result value)))
     (:boolean
      "T and NIL print as t and nil."
      (:when (or (eq value t) (null value)))

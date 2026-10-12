@@ -30,8 +30,8 @@ seeds and budgets that ran. It is not a proof.
 
 | Function | Function Spec | Properties |
 |---|---|---|
-| `evaluate` | never signals; metrics have the shape of §13.2; success has no error, failure returns `nil` with a documented error type and a message (§12, §13); never reports `internal-error`, so no host error escapes (§1, §12); `steps-used + fuel-remaining = fuel` (§11.1); output never exceeds `max-output`; a success stays inside every limit; a step/memory limit error is witnessed by its counter; no number in a result exceeds `max-integer` (§3, §11.4). Covers calls that pass every limit explicitly. | `evaluate-reports-invalid-arguments`, `evaluate-default-fuel-is-documented`, `evaluate-sees-host-bindings`, `evaluate-is-deterministic`, `step-limit-is-exact`, `memory-limit-is-exact`, `recursion-limit-is-exact`, `output-limit-is-exact`, `integer-arithmetic-agrees-with-common-lisp`, `out-of-range-float-literals-are-parse-errors`, `float-overflow-is-a-number-limit`, `quotient-and-mod-truncate-toward-zero`, `quoted-data-round-trip-through-print-value`, `equal?-is-structural-equality`, `evaluate-results-carry-host-strings` |
-| `print-value` | six cases by type (§10, §17.3): integer in decimal; float with a point, no exponent, reads back; `t`/`nil`; symbol bare; string quoted and reads back; list in parentheses | `quoted-data-round-trip-through-print-value`, `equal?-is-structural-equality` |
+| `evaluate` | never signals; metrics have the shape of §13.2; success has no error, failure returns `nil` with a documented error type and a message (§12, §13); never reports `internal-error`, so no host error escapes (§1, §12); a success returns a wardlisp value -- an integer, a double-float, `t`, `nil`, a symbol, a string, a closure, a builtin or a pair of such -- never a host object (§3); `steps-used + fuel-remaining = fuel` (§11.1); output never exceeds `max-output`; a success stays inside every limit; a step/memory limit error is witnessed by its counter; no number in a result exceeds `max-integer` (§3, §11.4). Covers calls that pass `fuel`, `max-depth`, `max-cons`, `max-output`, `max-integer` and `random-seed` explicitly; `timeout` is left at its default. | `evaluate-reports-invalid-arguments`, `evaluate-default-fuel-is-documented`, `evaluate-sees-host-bindings`, `evaluate-checks-bound-numbers`, `evaluate-is-deterministic`, `seeded-random-is-reproducible`, `evaluate-ignores-host-dynamic-environment`, `step-limit-is-exact`, `memory-limit-is-exact`, `recursion-limit-is-exact`, `output-limit-is-exact`, `integer-arithmetic-agrees-with-common-lisp`, `out-of-range-float-literals-are-parse-errors`, `non-ascii-digits-are-symbol-characters`, `float-overflow-is-a-number-limit`, `quotient-and-mod-truncate-toward-zero`, `quoted-data-round-trip-through-print-value`, `equal?-is-structural-equality`, `evaluate-results-carry-host-strings` |
+| `print-value` | six cases by type (§10, §17.3): integer in decimal; float as a plain decimal fraction (a point, at least one digit after it, no exponent) whose exact value rounds back to the float, over magnitudes from 1e-300 to 1e300; `t`/`nil`; symbol bare; string quoted and reads back; list in parentheses | `quoted-data-round-trip-through-print-value`, `equal?-is-structural-equality` |
 | `make-string-value` | a CL string gives a string value with equal contents and its own storage; anything else signals `wardlisp-type-error` (§17.8) | `host-strings-are-copied-both-ways`, `evaluate-results-carry-host-strings` |
 | `string-value` | a string value gives a fresh CL string of its contents; anything else signals `wardlisp-type-error` (§17.8) | the same two |
 | `string-value-p`, `symbol-value-p`, `number-value-p` | a boolean, true exactly for their type (§17.8) | `value-classifiers-partition-data` |
@@ -43,9 +43,10 @@ Function Specs are registered on the production symbols (`print-value` lives in
 
 The `*-limit-is-exact` properties state §11's boundary rule directly: a program
 that uses N of a resource succeeds with limit N and fails with the matching
-error with limit N - 1. They hold vacuously for a generated program that fails
-anyway or uses fewer than two units; the `limit-program` generator is weighted
-so that most trials do use every resource.
+error with limit N - 1. Their programs come from `*limit-programs*`
+(`specs/generators.lisp`), which lists, per resource, templates and arguments
+that succeed and use at least two units of it; a program that does not is a
+failure of the property, never a vacuous pass.
 
 ## Running
 
@@ -96,6 +97,13 @@ requires that each is caught under every seed:
 | `mod` computed with `cl:mod` (floor) | `quotient-and-mod-truncate-toward-zero` |
 | `parse-float-token` that lets the host reader's error through | `out-of-range-float-literals-are-parse-errors` |
 | `call-checking-float-range` that lets a float overflow through | `float-overflow-is-a-number-limit` |
+| `random` that ignores `:random-seed` | `seeded-random-is-reproducible`, `evaluate-is-deterministic` |
+| `call-with-sandbox-host-environment` that runs in the caller's environment | `evaluate-ignores-host-dynamic-environment` |
+| `ascii-digit-p` that accepts every Unicode digit | `non-ascii-digits-are-symbol-characters` |
+
+A mutant counts as caught only when a run reaches a verdict against it --
+status `failed` (a counterexample) or `error` (the target signalled in a trial).
+A run the runner itself could not carry out catches nothing.
 
 It replaces production functions while it runs; use it only in a process of
 its own.
@@ -115,13 +123,18 @@ commit, after running the bundle against the new revision.
 ## Known gaps
 
 - Of `evaluate`'s defaults only `fuel` (1,000,000) is checked; the `evaluate`
-  contract itself covers calls that pass every limit.
+  contract itself covers calls that pass the other limits explicitly.
 - `timeout-exceeded` is never reached by the generated programs, which are
-  bounded by small fuel.
+  bounded by small fuel, and no generated call passes `:timeout`.
+- `print-value` never uses an exponent (§10), so a float of very small or very
+  large magnitude prints longer than the 100-character literal limit (§2.5) and
+  cannot be read back. The `print-value` contract checks what §10 says; the
+  round-trip property generates floats of at most 1000 in magnitude.
 - `print-value` prints a pair `(3 . 4)` and the three-element list of `3`, the
   symbol `.` and `4` identically, and the reader has no dotted-pair syntax, so
   the round-trip property is limited to proper lists of symbols that start with
   a letter.
-- Closures, builtins, `timeout`, and `random` without a seed are not covered.
+- Closures and builtins are covered only as permitted results; `random`
+  without a seed is not covered.
 - Floats are generated only up to 1000 in magnitude with three decimals.
 - Input-domain coverage is not measured.
