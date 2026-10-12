@@ -243,6 +243,26 @@ value, and integer-limit-exceeded otherwise."
           (eql value expected)
           (eq type 'wardlisp/src/types:wardlisp-integer-limit-exceeded)))))
 
+(defproperty lengths-respect-max-integer
+    ((size (range integer 0 40))
+     (limit (range integer 1 40))
+     (kind (member :list :string)))
+  "Sections 3.1 and 11.4: a length that length or string-length returns is a
+number like any other, so it is at most max-integer or the call fails with
+integer-limit-exceeded."
+  (:about evaluate)
+  (:kind :model)
+  (:trials (:smoke 30 :normal 200))
+  (let ((code (ecase kind
+                (:list (format nil "(length '(~{~A~^ ~}))" (make-list size :initial-element 1)))
+                (:string (format nil "(string-length ~S)"
+                                 (make-string size :initial-element #\a))))))
+    (multiple-value-bind (value metrics type) (run code :max-integer limit)
+      (declare (ignore metrics))
+      (if (<= size limit)
+          (and (null type) (eql value size))
+          (eq type 'wardlisp/src/types:wardlisp-integer-limit-exceeded)))))
+
 (defproperty out-of-range-float-literals-are-parse-errors
     ((literal out-of-range-float-literal)
      (context (member :alone :quoted :argument)))

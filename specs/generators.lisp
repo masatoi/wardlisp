@@ -207,7 +207,8 @@ for symbols and lists, the printed form itself for self-evaluating atoms."
 (shout ~D)")
     (:echo . "(define (echo xs) (if (null? xs) 'done (begin (print (car xs)) (echo (cdr xs)))))
 (echo (list ~D \"hi\" 'sym (list 1 \"a\\nb\")))")
-    (:grow . "(define (grow n s) (if (= n 0) (string-length s) (grow (- n 1) (string-append s \"ab\"))))
+    (:grow . "(define (grow n s)
+  (if (= n 0) (string-length s) (grow (- n 1) (string-append s \"ab\"))))
 (grow ~D \"\")")
     (:fact . "(define (fact n) (if (= n 0) 1 (* n (fact (- n 1))))) (fact ~D)")
     (:spin . "(define (spin n) (spin n)) (spin ~D)")
@@ -450,17 +451,26 @@ string.")
 
 (defspec builtin-arguments (satisfies consp) (:generator probe-arguments))
 
+(defun random-limit (typical)
+  "Return a limit: usually from 1 to TYPICAL, so generated programs reach it, and
+one time in eight a bignum, since the contract admits any positive integer."
+  (if (zerop (random 8))
+      (expt 10 (+ 19 (random 40)))
+      (1+ (random typical))))
+
 (defgenerator evaluate-arguments ()
   "A whole EVALUATE call: a program and every resource limit, small enough that
-each limit is reached by some generated program."
+each limit is reached by some generated program, and now and then a bignum."
   (list (random-program)
         :fuel (1+ (random 5000))
-        :max-depth (1+ (random 60))
-        :max-cons (1+ (random 500))
-        :max-output (1+ (random 100))
-        ;; A quarter of the calls allow numbers beyond double-float range, where
-        ;; float arithmetic overflows before max-integer is reached.
-        :max-integer (if (zerop (random 4))
-                         (expt 2 (+ 1024 (random 2000)))
-                         (expt 2 (+ 8 (random 60))))
+        :max-depth (random-limit 60)
+        :max-cons (random-limit 500)
+        :max-output (random-limit 100)
+        ;; Numbers beyond double-float range, where float arithmetic overflows
+        ;; before max-integer is reached; ordinary ones; and ones so small that
+        ;; lengths and literals exceed them.
+        :max-integer (ecase (random 4)
+                       (0 (expt 2 (+ 1024 (random 2000))))
+                       ((1 2) (expt 2 (+ 8 (random 60))))
+                       (3 (1+ (random 256))))
         :random-seed (random 1000)))

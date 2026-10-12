@@ -226,8 +226,8 @@ Returns nil if either argument is not a number."
   (if (ocons-p (first args)) nil t))
 
 (defun builtin-length (args ctx)
-  "Built-in length function. Count elements in an ocons list."
-  (declare (ignore ctx))
+  "Built-in length function. Count elements in an ocons list, subject to
+max-integer like any other number."
   (let ((lst (first args)) (count 0))
     (unless (or (null lst) (ocons-p lst))
       (error 'wardlisp-type-error :message
@@ -237,7 +237,7 @@ Returns nil if either argument is not a number."
     (when lst
       (error 'wardlisp-type-error :message
              (format nil "length: improper list with tail ~a" (print-value lst))))
-    count))
+    (check-integer ctx count)))
 
 (defun builtin-append (args ctx)
   "Built-in append function. Concatenate zero or more lists."
@@ -366,11 +366,11 @@ Charges memory proportional to the result length."
       (make-wstring s))))
 
 (defun builtin-string-length (args ctx)
-  "Built-in string-length. Return the number of characters in a string."
-  (declare (ignore ctx))
+  "Built-in string-length. Return the number of characters in a string, subject
+to max-integer like any other number."
   (let ((s (first args)))
     (ensure-wstring "string-length" s)
-    (length (wstring-value s))))
+    (check-integer ctx (length (wstring-value s)))))
 
 ;;; --- Value printing ---
 

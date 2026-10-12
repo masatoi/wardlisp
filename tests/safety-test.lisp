@@ -190,6 +190,25 @@ leaves later evaluations working"
                    (getf (sb-int:get-floating-point-modes) :rounding-mode))))
       (apply #'sb-int:set-floating-point-modes saved))))
 
+(deftest test-limits-may-be-any-positive-integer
+  "Section 13.1: every limit is a positive integer, bignums included"
+  (let ((huge (expt 10 100)))
+    (dolist (option '(:fuel :max-depth :max-cons :max-output :max-integer))
+      (ok (eql 3 (wardlisp:evaluate "(+ 1 2)" option huge)) (string option)))))
+
+(deftest test-lengths-respect-max-integer
+  "Section 3.1: an integer a builtin returns is subject to max-integer too"
+  (flet ((error-type (code)
+           (getf (nth-value 1 (wardlisp:evaluate code :max-integer 5)) :error-type)))
+    (ok (eq 'wardlisp-integer-limit-exceeded (error-type "(string-length \"abcdefgh\")")))
+    (ok (eq 'wardlisp-integer-limit-exceeded (error-type "(length '(1 1 1 1 1 1 1 1))")))
+    (ok (null (error-type "(length '(1 2 3))")))))
+
+(deftest test-negative-zero-float-literal
+  "\"-0.\" is the float -0.0, like \"-0.0\""
+  (ok (eql -0.0d0 (wardlisp:evaluate "-0.")))
+  (ok (eql -0.0d0 (wardlisp:evaluate "-0.0"))))
+
 ;; --- Output limit ---
 (deftest test-output-limit
   (ok (signals

@@ -134,7 +134,8 @@
     (ok (equal fullwidth-float (wardlisp-read fullwidth-float)))
     (ok (equal fullwidth-integer (wardlisp-read fullwidth-integer)))
     (ok (equal arabic-indic (wardlisp-read arabic-indic)))
-    (ok (equal (list "+" fullwidth-integer) (wardlisp-read (format nil "(+ ~A)" fullwidth-integer))))))
+    (ok (equal (list "+" fullwidth-integer)
+               (wardlisp-read (format nil "(+ ~A)" fullwidth-integer))))))
 
 (deftest test-reader-ignores-host-reader-settings
   "Numeric literals read the same whatever the host's reader variables are"

@@ -89,13 +89,13 @@ so the host can tell dialogue text apart from directive tags."
                                (max-expr-depth 1000))))
   "Mutable execution context tracking resource consumption."
   (fuel 10000 :type integer)
-  (max-depth 100 :type fixnum)
+  (max-depth 100 :type integer)
   (current-depth 0 :type fixnum)
   (cons-count 0 :type fixnum)
-  (max-cons 10000 :type fixnum)
+  (max-cons 10000 :type integer)
   (output (make-array 0 :element-type 'character :adjustable t :fill-pointer 0)
           :type (array character (*)))
-  (max-output 1000 :type fixnum)
+  (max-output 1000 :type integer)
   (steps-used 0 :type integer)
   (max-depth-reached 0 :type fixnum)
   (max-integer (expt 2 64) :type integer)
@@ -166,6 +166,8 @@ so the host can tell dialogue text apart from directive tags."
 Accepts both integers and floats."
   (when (> (abs value) (exec-ctx-max-integer ctx))
     (error 'wardlisp-integer-limit-exceeded
-           :message (format nil "Number ~a exceeds limit ~d"
-                            value (exec-ctx-max-integer ctx))))
+           ;; ~F prints a float in plain decimal, as wardlisp does, rather than
+           ;; in the host's syntax (1.0d20).
+           :message (format nil "Number ~:[~d~;~f~] exceeds limit ~d"
+                            (floatp value) value (exec-ctx-max-integer ctx))))
   value)

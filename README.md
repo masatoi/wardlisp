@@ -90,8 +90,8 @@ Every failure a program can cause is reported as one of WardLisp's own error typ
 | Wall-clock time | 5 seconds | `timeout-exceeded` |
 
 The default fuel of 1,000,000 steps is spent in a few tens of milliseconds by
-typical programs, and in about a second or two by a program built to make each
-step expensive (repeated `equal?` on long lists). The timeout is what bounds
+typical programs, and in a few seconds at most by a program built to make each
+step expensive (repeated `equal?`, `length` or `apply` on long lists). The timeout is what bounds
 wall-clock time.
 
 ## Usage
@@ -102,17 +102,18 @@ wall-clock time.
 ;; Basic evaluation
 (wardlisp:evaluate "(+ 1 2)")
 ;; => 3
-;; => (:steps-used 7 :max-depth-reached 0 :cons-allocated 0 ...)
+;; => (:steps-used 8 :max-depth-reached 0 :cons-allocated 0 ...)
 
 ;; With custom limits
-(wardlisp:evaluate "(fact 20)"
+(wardlisp:evaluate "(define (fact n) (if (= n 0) 1 (* n (fact (- n 1))))) (fact 20)"
   :fuel 10000
   :max-depth 200)
+;; => 2432902008176640000
 
 ;; Resource exhaustion is safe
 (wardlisp:evaluate "((lambda (f) (f f)) (lambda (f) (f f)))")
 ;; => NIL
-;; => (:error-type :step-limit-exceeded :error-message "..." ...)
+;; => (... :error-type wardlisp:wardlisp-step-limit-exceeded :error-message "..." ...)
 ```
 
 The `evaluate` function returns two values: the result (or `NIL` on error) and a metrics plist containing `:steps-used`, `:max-depth-reached`, `:cons-allocated`, `:output`, `:fuel-remaining`, `:error-type`, and `:error-message`.

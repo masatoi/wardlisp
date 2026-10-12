@@ -35,6 +35,7 @@
     recursion-limit-is-exact
     output-limit-is-exact
     integer-arithmetic-agrees-with-common-lisp
+    lengths-respect-max-integer
     out-of-range-float-literals-are-parse-errors
     non-ascii-digits-are-symbol-characters
     float-literals-denote-their-decimal-value
@@ -264,6 +265,8 @@ before out-of-range literals were classified."
      (:property builtins-contain-misuse))
     (wardlisp/src/reader::parse-float-token mutant-parse-float-token-keeping-integers
      (:property float-literals-denote-their-decimal-value))
+    (wardlisp/src/builtins::builtin-string-length mutant-builtin-string-length
+     (:property lengths-respect-max-integer) (:function-spec evaluate))
     ;; Last: an unbounded timeout can corrupt the host's timer queue for the
     ;; rest of the process, which would make every later check fail.
     (wardlisp::valid-timeout-p mutant-valid-timeout-p
@@ -319,6 +322,11 @@ caller set."
           (*read-eval* nil))
       (read-from-string token))))
 
+(defun mutant-builtin-string-length (args ctx)
+  "The string-length builtin without the max-integer check."
+  (declare (ignore ctx))
+  (length (wstring-value (first args))))
+
 (defun mutant-valid-timeout-p (timeout)
   "VALID-TIMEOUT-P with neither the NaN guard nor the upper bound."
   (and (realp timeout) (plusp timeout)))
@@ -352,7 +360,8 @@ own."
 (defun print-entry (entry stream)
   "Print one line for ENTRY, and its counterexample when it did not pass."
   (let ((problems (judge-entry entry)))
-    (format stream "~&~:[PASS~;FAIL~] ~(~A~) ~(~A~) seed=~A status=~(~A~) trials=~A~@[ rejected=~A~]~%"
+    (format stream "~&~:[PASS~;FAIL~] ~(~A~) ~(~A~) seed=~A status=~(~A~) ~
+                    trials=~A~@[ rejected=~A~]~%"
             problems (getf entry :kind) (getf entry :name) (getf entry :seed)
             (getf entry :status) (getf entry :trials) (getf entry :rejected))
     (when problems

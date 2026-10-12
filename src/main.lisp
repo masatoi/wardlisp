@@ -33,8 +33,10 @@
        t))
 
 (defconstant +max-timeout+ 1000000
-  "The largest :timeout EVALUATE accepts, in seconds.  Larger values overflow
-the host's timer arithmetic.")
+  "The largest :timeout EVALUATE accepts, in seconds (about eleven days).  The
+host's timer arithmetic overflows somewhere above 1e18 seconds and is then
+broken for every later call; this cap keeps far away from that and from any
+timeout an evaluation could need.")
 
 (defun valid-timeout-p (timeout)
   "True if TIMEOUT is a real number of seconds greater than zero and at most
@@ -158,8 +160,13 @@ afterwards."
                  (values nil
                          (make-metrics ctx :error-type 'wardlisp-timeout-exceeded
                                        :error-message
-                                       (format nil "Evaluation timed out after ~d second~:p"
-                                               timeout))))
+                                       (format nil "Evaluation timed out after ~
+                                                    ~:[~f~;~d~] second~:[s~;~]"
+                                               (integerp timeout)
+                                               (if (integerp timeout)
+                                                   timeout
+                                                   (float timeout 1d0))
+                                               (eql timeout 1)))))
                (serious-condition (e)
                  (values nil
                          (make-metrics ctx :error-type 'wardlisp-internal-error
@@ -198,10 +205,17 @@ strings (see MAKE-STRING-VALUE).
 
 The result does not depend on the caller's reader and printer variables or
 floating-point traps (see CALL-WITH-SANDBOX-HOST-ENVIRONMENT)."
-  (call-with-sandbox-host-environment
-   (lambda ()
-     (evaluate-in-sandbox code fuel max-depth max-cons max-output max-integer timeout
-                          random-seed bindings))))
+  ;; Last line of defence: EVALUATE never signals.  A host condition that
+  ;; escapes everything inside is a defect, reported as internal-error.
+  (handler-case
+      (call-with-sandbox-host-environment
+       (lambda ()
+         (evaluate-in-sandbox code fuel max-depth max-cons max-output max-integer timeout
+                              random-seed bindings)))
+    (serious-condition (e)
+      (values nil (make-metrics nil :error-type 'wardlisp-internal-error
+                                    :error-message (format nil "Internal error: ~a"
+                                                           (type-of e)))))))
 
 (defun make-metrics (ctx &key error-type error-message)
   "Build metrics plist from execution context.  CTX may be nil if context creation itself failed."
