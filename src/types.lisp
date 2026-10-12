@@ -21,7 +21,7 @@
    #:exec-ctx-output #:exec-ctx-max-output
    #:exec-ctx-steps-used #:exec-ctx-max-depth-reached
    #:exec-ctx-max-integer
-   #:exec-ctx-expr-depth #:exec-ctx-max-expr-depth
+   #:exec-ctx-expr-depth #:exec-ctx-max-expr-depth #:exec-ctx-deadline-passed
    ;; Conditions
    #:wardlisp-error #:wardlisp-error-message
    #:wardlisp-parse-error
@@ -101,7 +101,9 @@ so the host can tell dialogue text apart from directive tags."
   (max-depth-reached 0 :type fixnum)
   (max-integer (expt 2 64) :type integer)
   (expr-depth 0 :type fixnum)
-  (max-expr-depth 1000 :type fixnum))
+  (max-expr-depth 1000 :type fixnum)
+  ;; Set by EVALUATE's timer when :timeout expires; checked at every step.
+  (deadline-passed nil))
 
 ;;; --- Error conditions ---
 
@@ -125,7 +127,10 @@ so the host can tell dialogue text apart from directive tags."
 ;;; --- Resource control helpers ---
 
 (defun consume-fuel (ctx &optional (amount 1))
-  "Consume fuel from context. Signals step-limit-exceeded when exhausted."
+  "Consume fuel from context. Signals step-limit-exceeded when exhausted, and
+timeout-exceeded once EVALUATE's timer has marked the deadline as passed."
+  (when (exec-ctx-deadline-passed ctx)
+    (error 'wardlisp-timeout-exceeded :message "Evaluation timed out"))
   (decf (exec-ctx-fuel ctx) amount)
   (incf (exec-ctx-steps-used ctx) amount)
   (when (< (exec-ctx-fuel ctx) 0)

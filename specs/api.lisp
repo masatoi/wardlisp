@@ -119,9 +119,14 @@ TEXT is not of that form."
 
 (defun denotes-float-p (text value)
   "Section 10: TEXT is a plain decimal fraction, with at least one digit after
-the point and no exponent, whose exact value rounds to the double-float VALUE."
-  (let ((exact (decimal-text-value text)))
-    (and exact (= value (float exact 1d0)))))
+the point and no exponent, whose exact value rounds to the double-float VALUE,
+and without trailing zeros after the point beyond the one digit kept."
+  (let ((exact (decimal-text-value text))
+        (fraction (subseq text (1+ (or (position #\. text) -1)))))
+    (and exact
+         (= value (nearest-double exact))
+         (or (= (length fraction) 1)
+             (char/= #\0 (char fraction (1- (length fraction))))))))
 
 (defspec-function print-value
   "Every data value prints as the text section 10 and 17.3 give for its type."

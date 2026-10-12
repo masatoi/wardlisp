@@ -169,4 +169,7 @@ commit, after running the bundle against the new revision.
   duplicate-name check, are checked by the Rove suite only.
 - Host work per step grows with the number of bindings in scope (variable
   lookup scans association lists); only the timeout bounds a large program.
+- Float values are compared with `nearest-double` (`specs/generators.lisp`), a
+  reference conversion that rounds to nearest in the subnormal range, where
+  SBCL's own conversion truncates.
 - Input-domain coverage is not measured.

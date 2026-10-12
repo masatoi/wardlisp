@@ -372,7 +372,8 @@ always succeeds."
     ((parts float-literal))
   "Section 2.5.2: every float literal shape -- \"12.\", \"12.5\", \".5\", \"12e3\"
 and their combinations, signed or not -- reads as the double-float nearest to
-the decimal number it writes, with the sign of a written zero kept."
+the decimal number it writes, ties to even, subnormals included, with the sign
+of a literal that rounds to zero kept."
   (:about evaluate)
   (:kind :model)
   (:trials (:smoke 30 :normal 300))
@@ -387,9 +388,9 @@ the decimal number it writes, with the sign of a written zero kept."
       (multiple-value-bind (value metrics) (run text :max-integer (expt 10 400))
         (and (succeeded-p metrics)
              (typep value 'double-float)
-             (eql value (if (and (zerop exact) (string= sign "-"))
-                            -0.0d0
-                            (float exact 1d0))))))))
+             (eql value (let ((nearest (nearest-double exact)))
+                          ;; A literal that rounds to zero keeps its sign.
+                          (if (and (zerop nearest) (string= sign "-")) -0.0d0 nearest))))))))
 
 (defun misuse-arities (arity)
   "Return the argument counts to try for a builtin of ARITY: the right ones and
@@ -428,6 +429,8 @@ edge."
                     (let ((infinity (symbol-value 'sb-ext:double-float-positive-infinity)))
                       (- infinity infinity))))
     (:timeout-ratio 1/2)
+    (:timeout-tiny-ratio 1/1000000000)
+    (:timeout-tiny-float 1d-300)
     (:timeout-maximum 1000000)
     (:timeout-zero 0)
     (:timeout-string "5")
@@ -441,27 +444,32 @@ edge."
 
 (defproperty evaluate-contains-malformed-host-arguments
     ((kind (member :timeout-huge-integer :timeout-huge-float :timeout-infinity :timeout-nan
-                   :timeout-ratio :timeout-maximum :timeout-zero :timeout-string
+                   :timeout-ratio :timeout-tiny-ratio :timeout-tiny-float :timeout-maximum
+                   :timeout-zero :timeout-string
                    :bindings-dotted :bindings-circular :bindings-atom :bindings-bad-entry
                    :bindings-bad-name :bindings-nan :bindings-infinity)))
   "Sections 13.1 and 17.9: a malformed or out-of-range :timeout or :bindings is
 refused as a wardlisp error without signalling and without disturbing the
 process -- the next evaluation still works -- and a valid edge value is
-accepted."
+accepted; a timeout far below a microsecond ends the run as timeout-exceeded or
+lets it finish, never as a host condition."
   (:about evaluate)
   (:kind :invariant)
-  (:trials (:smoke 15 :normal 60))
+  (:trials (:smoke 15 :normal 80))
   (let* ((argument (host-argument kind))
          (timeout-p (member kind '(:timeout-huge-integer :timeout-huge-float
                                    :timeout-infinity :timeout-nan :timeout-ratio
+                                   :timeout-tiny-ratio :timeout-tiny-float
                                    :timeout-maximum :timeout-zero :timeout-string)))
          (type (nth-value 2 (if timeout-p
                                 (run "(+ 1 2)" :timeout argument)
                                 (run "(+ 1 2)" :bindings argument)))))
-    (and (if (member kind '(:timeout-ratio :timeout-maximum))
-             (null type)
-             (member type '(wardlisp/src/types:wardlisp-type-error
-                            wardlisp/src/types:wardlisp-integer-limit-exceeded)))
+    (and (case kind
+           ((:timeout-ratio :timeout-maximum) (null type))
+           ((:timeout-tiny-ratio :timeout-tiny-float)
+            (member type '(nil wardlisp/src/types:wardlisp-timeout-exceeded)))
+           (t (member type '(wardlisp/src/types:wardlisp-type-error
+                             wardlisp/src/types:wardlisp-integer-limit-exceeded))))
          (eql 3 (run "(+ 1 2)")))))
 
 (defproperty float-overflow-is-a-number-limit

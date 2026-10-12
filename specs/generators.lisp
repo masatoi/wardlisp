@@ -63,6 +63,21 @@ type."
         while (ocons-p tail)
         collect (ocons-ocar tail)))
 
+(defun nearest-double (rational)
+  "Return the double-float nearest to RATIONAL, ties to even, subnormals
+included -- SBCL's own conversion truncates in the subnormal range, so this is
+the reference the contracts compare against.  RATIONAL must be within
+double-float range."
+  (let ((magnitude (abs rational)))
+    (sb-int:with-float-traps-masked (:underflow :inexact)
+      (let ((result (cond ((zerop magnitude) 0d0)
+                          ((< magnitude (rational least-positive-normalized-double-float))
+                           (scale-float (coerce (round (* magnitude (expt 2 1074)))
+                                                'double-float)
+                                        -1074))
+                          (t (coerce magnitude 'double-float)))))
+        (if (minusp rational) (- result) result)))))
+
 (defun wardlisp-number-p (value)
   "True when VALUE is a wardlisp number: an integer or a finite double-float
 (sections 3.1 and 3.2).  Ratios, complexes, other floats, infinities and NaNs
@@ -425,7 +440,8 @@ one non-ASCII Unicode decimal digit set."
   "The parts of a float literal of any shape section 2.5.2 admits -- digits and
 a point (\"12.\", \"12.5\", \".5\"), digits and an exponent (\"12e3\"), or both
 -- as (TEXT SIGN INTEGER-DIGITS FRACTION-DIGITS EXPONENT), with an exponent
-from -300 to 300 when there is one."
+from -330 to 300 when there is one, so subnormals and underflow to zero are
+reached too."
   (let* ((sign (random-element '("" "+" "-")))
          (shape (random 4))
          (integer-digits (if (= shape 2) "" (random-digits (1+ (random 4)))))
@@ -434,7 +450,7 @@ from -300 to 300 when there is one."
                             ((1 2) (random-digits (1+ (random 4))))
                             (t "")))
          (point (if (= shape 3) "" "."))
-         (exponent (if (or (= shape 3) (zerop (random 2))) (- (random 601) 300) nil)))
+         (exponent (if (or (= shape 3) (zerop (random 2))) (- (random 631) 330) nil)))
     (list (format nil "~A~A~A~A~@[e~D~]" sign integer-digits point fraction-digits exponent)
           sign integer-digits fraction-digits exponent)))
 

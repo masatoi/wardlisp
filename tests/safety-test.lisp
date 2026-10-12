@@ -366,6 +366,45 @@ host stack"
     (dolist (code (list name (format nil "~A:b" name)))
       (ok (< (length (getf (nth-value 1 (wardlisp:evaluate code)) :error-message)) 300)))))
 
+(deftest test-tiny-timeouts-never-signal
+  "A valid timeout far below a microsecond ends the evaluation as
+timeout-exceeded (or lets it finish); it never escapes as a host condition"
+  (dolist (timeout (list 1/1000000000 1d-300 1/2000000))
+    (ok (loop repeat 100
+              always (member (handler-case
+                                 (getf (nth-value 1 (wardlisp:evaluate "(define (f) (f)) (f)"
+                                                                       :timeout timeout
+                                                                       :fuel (expt 10 12)))
+                                       :error-type)
+                               (serious-condition () :escaped))
+                             '(wardlisp-timeout-exceeded nil)))
+        (format nil "timeout ~S" timeout))))
+
+(deftest test-host-timeout-at-the-same-deadline-is-delivered
+  "A host timeout that expires together with evaluate's own still reaches the
+host"
+  (ok (eq :host-timeout
+          (handler-case
+              (sb-ext:with-timeout 1/2
+                (wardlisp:evaluate "(define (f) (f)) (f)" :timeout 1/2 :fuel (expt 10 15))
+                (sleep 2)
+                :host-body-completed)
+            (sb-ext:timeout () :host-timeout)))))
+
+(defun correctly-rounded-subnormal (rational)
+  "Return the double nearest to RATIONAL, a positive value below the smallest
+normalized double, rounding ties to even."
+  (scale-float (coerce (round (* rational (expt 2 1074))) 'double-float) -1074))
+
+(deftest test-subnormal-literals-round-to-nearest
+  "Float literals in the subnormal range read as the nearest double"
+  (dolist (case '(("1.23456e-315" 123456 -320) ("7.777e-320" 7777 -323)
+                  ("2.2250738585072e-308" 22250738585072 -321)))
+    (destructuring-bind (text mantissa exponent) case
+      (ok (eql (correctly-rounded-subnormal (* mantissa (expt 10 exponent)))
+               (wardlisp:evaluate text))
+          text))))
+
 ;; --- Output limit ---
 (deftest test-output-limit
   (ok (signals

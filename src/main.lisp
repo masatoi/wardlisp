@@ -73,13 +73,15 @@ a number beyond CTX's max-integer."
         (unless (stringp name)
           (error 'wardlisp-type-error
                  :message (format nil ":bindings: name must be a string, got ~a"
-                                  (type-of name))))
+                                  (let ((type (type-of name)))
+                                    (if (consp type) (car type) type)))))
         (when (or (string-equal name "t") (string-equal name "nil"))
           (error 'wardlisp-type-error
                  :message (format nil ":bindings: ~a is a reserved name" name)))
         (unless (valid-binding-value-p value)
           (error 'wardlisp-type-error
-                 :message (format nil ":bindings: unsupported value for ~a" name)))
+                 :message (format nil ":bindings: unsupported value for ~a"
+                                  (abbreviate-text name))))
         (when (floatp value)
           (setf value (coerce value 'double-float)))
         (when (numberp value)
@@ -119,11 +121,25 @@ or an interactive interrupt -- rather than one evaluation caused.  EVALUATE
 lets such a condition through unless it is its own timeout."
   (typep condition '(or sb-ext:timeout sb-sys:interactive-interrupt)))
 
-(defun own-deadline-passed-p (started timeout)
-  "True if TIMEOUT seconds have (all but) elapsed since the internal real time
-STARTED, so that a timeout signalled now is EVALUATE's own."
-  (>= (/ (- (get-internal-real-time) started) internal-time-units-per-second)
-      (* 99/100 timeout)))
+(define-condition sandbox-deadline-reached (serious-condition) ()
+  (:documentation "Signalled by EVALUATE's own timer when :timeout expires.  A
+condition of its own, so that EVALUATE never mistakes a timeout the host set
+around it for its own, nor its own for the host's."))
+
+(defun call-with-sandbox-deadline (seconds ctx thunk)
+  "Call THUNK under a deadline of SECONDS, in two stages.  When SECONDS pass, a
+timer marks CTX's deadline as passed and returns normally; the evaluator stops
+at its next step with wardlisp-timeout-exceeded.  Returning normally matters:
+a timer that unwinds can make SBCL drop another timer expiring at the same
+moment, such as one the host set around EVALUATE.  Should a single step run on
+for another second, a second timer signals SANDBOX-DEADLINE-REACHED to stop it."
+  (let ((soft (sb-ext:make-timer (lambda () (setf (exec-ctx-deadline-passed ctx) t))))
+        (hard (sb-ext:make-timer (lambda () (error 'sandbox-deadline-reached)))))
+    (sb-ext:schedule-timer soft seconds)
+    (sb-ext:schedule-timer hard (+ seconds 1))
+    (unwind-protect (funcall thunk)
+      (sb-ext:unschedule-timer hard)
+      (sb-ext:unschedule-timer soft))))
 
 (defun timeout-message (timeout)
   "Return the error message for an evaluation stopped after TIMEOUT seconds."
@@ -174,22 +190,23 @@ STARTED, so that a timeout signalled now is EVALUATE's own."
              ;; condition was signalled, possibly on an exhausted stack, so the
              ;; metrics are built after unwinding.
              (multiple-value-bind (outcome payload)
-                 (let ((started (get-internal-real-time)))
-                   (block evaluation
+                 (block evaluation
                      (handler-bind
                          ((wardlisp-error
                             (lambda (e) (return-from evaluation (values :wardlisp-error e))))
-                          (serious-condition
+                          (sandbox-deadline-reached
                             (lambda (e)
-                              (cond ((not (host-signal-p e))
-                                     (return-from evaluation (values :internal-error e)))
-                                    ;; Our own timer: the deadline has passed.  A
-                                    ;; timeout or interrupt the host set around
-                                    ;; EVALUATE is declined, so it reaches the host.
-                                    ((and (typep e 'sb-ext:timeout)
-                                          (own-deadline-passed-p started timeout))
-                                     (return-from evaluation (values :timeout nil)))))))
-                       (sb-ext:with-timeout timeout
+                              (declare (ignore e))
+                              (return-from evaluation (values :timeout nil))))
+                          (serious-condition
+                            ;; A timeout or interrupt the host set around
+                            ;; EVALUATE is declined, so it reaches the host.
+                            (lambda (e)
+                              (unless (host-signal-p e)
+                                (return-from evaluation (values :internal-error e))))))
+                       (call-with-sandbox-deadline
+                        timeout ctx
+                        (lambda ()
                          ;; Host arguments are checked before the program is read,
                          ;; so a malformed :bindings is reported whatever the
                          ;; program text.
@@ -203,7 +220,10 @@ STARTED, so that a timeout signalled now is EVALUATE's own."
                  (:value (values payload (make-metrics ctx)))
                  (:wardlisp-error
                   (values nil (make-metrics ctx :error-type (type-of payload)
-                                                :error-message (wardlisp-error-message payload))))
+                                                :error-message
+                                                (if (typep payload 'wardlisp-timeout-exceeded)
+                                                    (timeout-message timeout)
+                                                    (wardlisp-error-message payload)))))
                  (:timeout
                   (values nil (make-metrics ctx :error-type 'wardlisp-timeout-exceeded
                                                 :error-message (timeout-message timeout))))

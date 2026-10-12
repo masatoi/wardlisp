@@ -159,28 +159,62 @@ the decoded length at +max-string-length+."
           (t lower))))
 
 (defun parse-float-token (token)
-  "Read TOKEN, which FLOAT-TOKEN-P accepted, as a double-float.  The host reader
-runs under standard syntax, so the host's reader variables and readtable cannot
-change what a literal means.  A literal beyond double-float range is a
-wardlisp-parse-error: the host reader's own error must not escape the sandbox."
-  (let ((value (handler-case
-                   (with-standard-io-syntax
-                     (let ((*read-default-float-format* 'double-float)
-                           (*read-eval* nil))
-                       (read-from-string token)))
-                 ((or reader-error arithmetic-error) ()
-                   (error 'wardlisp-parse-error
-                          :message (format nil "Float literal out of range: ~a" token))))))
-    ;; The host reader reads digit+ '.' ("1.") as a decimal integer; in
-    ;; wardlisp it is a float literal (section 15 of docs/language-spec.md).
-    (cond ((integerp value)
-           ;; The integer loses the sign of "-0."; the float keeps it.
-           (if (and (zerop value) (char= #\- (char token 0)))
-               -0.0d0
-               (coerce value 'double-float)))
-          ((typep value 'double-float) value)
-          (t (error 'wardlisp-parse-error
-                    :message (format nil "Malformed float literal: ~a" token))))))
+  "Read TOKEN, which FLOAT-TOKEN-P accepted, as the double-float nearest to the
+decimal number it writes, ties to even -- in the subnormal range too, where the
+host's conversion truncates.  The host reader is not used, so no host setting
+can change the result.  A literal beyond double-float range is a
+wardlisp-parse-error; one too small for any double rounds to zero, keeping its
+sign."
+  (multiple-value-bind (negative mantissa exponent) (decimal-token-parts token)
+    (let ((magnitude (decimal-to-double mantissa exponent token)))
+      (if negative (- magnitude) magnitude))))
+
+(defun decimal-token-parts (token)
+  "Split the float TOKEN into a sign, an integer mantissa made of all its digits,
+and the decimal exponent that mantissa needs: the value is
+mantissa * 10^exponent."
+  (let* ((negative (char= #\- (char token 0)))
+         (start (if (find (char token 0) "+-") 1 0))
+         (marker (position-if (lambda (ch) (char-equal ch #\e)) token))
+         (number-part (subseq token start (or marker (length token))))
+         (point (position #\. number-part))
+         (fraction-length (if point (- (length number-part) point 1) 0))
+         (digits (remove #\. number-part))
+         (exponent (if marker (parse-integer token :start (1+ marker)) 0)))
+    (values negative
+            (if (string= digits "") 0 (parse-integer digits))
+            (- exponent fraction-length))))
+
+(defun decimal-to-double (mantissa exponent token)
+  "Return the double-float nearest to MANTISSA * 10^EXPONENT (a non-negative
+value), ties to even.  Signals wardlisp-parse-error, naming TOKEN, when it is
+beyond double-float range."
+  (flet ((out-of-range ()
+           (error 'wardlisp-parse-error
+                  :message (format nil "Float literal out of range: ~a" token))))
+    (when (zerop mantissa)
+      (return-from decimal-to-double 0.0d0))
+    ;; The decimal order of magnitude bounds the work before any exact
+    ;; arithmetic: 1e309 is beyond the range, 1e-400 below half the smallest
+    ;; subnormal.
+    (let ((magnitude (+ exponent (length (princ-to-string mantissa)) -1)))
+      (cond ((> magnitude 309) (out-of-range))
+            ((< magnitude -400) (return-from decimal-to-double 0.0d0))))
+    (let ((value (* mantissa (expt 10 exponent))))
+      (sb-int:with-float-traps-masked (:underflow :inexact :overflow)
+        (let ((result
+                (if (< value (rational least-positive-normalized-double-float))
+                    ;; Subnormal: a multiple of 2^-1074, rounded half to even
+                    ;; by ROUND, then scaled exactly.
+                    (scale-float (coerce (round (* value (expt 2 1074))) 'double-float)
+                                 -1074)
+                    ;; The host's conversion signals overflow in software,
+                    ;; whatever the traps.
+                    (handler-case (coerce value 'double-float)
+                      (floating-point-overflow () (out-of-range))))))
+          (when (sb-ext:float-infinity-p result)
+            (out-of-range))
+          result)))))
 
 (defun ascii-digit-p (ch)
   "Is CH one of the ASCII digits 0-9?  Other Unicode decimal digits are ordinary
