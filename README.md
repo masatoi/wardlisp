@@ -78,14 +78,21 @@ No macros, no mutation (`set!`/`setf`), no loops, no `eval`, no I/O, no packages
 ## Resource Limits
 
 Every evaluation runs under hard limits. Exceeding any limit immediately halts execution with a specific error.
+Every failure a program can cause is reported as one of WardLisp's own error types; no host error escapes the evaluator.
 
 | Resource | Default | Error |
 |----------|---------|-------|
-| Computation steps (fuel) | 10,000 | `step-limit-exceeded` |
+| Computation steps (fuel) | 1,000,000 | `step-limit-exceeded` |
 | Recursion depth | 100 | `recursion-limit-exceeded` |
 | Cons cells allocated | 10,000 | `memory-limit-exceeded` |
 | Integer absolute value | 2^64 | `integer-limit-exceeded` |
 | Print output | 1,000 chars | `output-limit-exceeded` |
+| Wall-clock time | 5 seconds | `timeout-exceeded` |
+
+The default fuel of 1,000,000 steps is spent in a few tens of milliseconds by
+typical programs, and in about a second or two by a program built to make each
+step expensive (repeated `equal?` on long lists). The timeout is what bounds
+wall-clock time.
 
 ## Usage
 
@@ -99,7 +106,7 @@ Every evaluation runs under hard limits. Exceeding any limit immediately halts e
 
 ;; With custom limits
 (wardlisp:evaluate "(fact 20)"
-  :fuel 100000
+  :fuel 10000
   :max-depth 200)
 
 ;; Resource exhaustion is safe
@@ -172,9 +179,18 @@ Requires [SBCL](http://www.sbcl.org/) and [Roswell](https://roswell.github.io/) 
 # Run tests
 rove wardlisp.asd
 
+# Check the executable contracts (needs cl-spec; see docs/specs.md)
+ros run --load scripts/check-specs.lisp
+
 # Lint
-mallet src/*.lisp
+mallet src/*.lisp specs/*.lisp scripts/*.lisp
 ```
+
+The public API carries [cl-spec](https://github.com/masatoi/cl-spec) contracts
+derived from `docs/language-spec.md` (system `wardlisp/specs`, opt-in). CI runs
+the Rove suite and checks the contracts with fixed seeds, including a negative
+control that each known-wrong implementation must fail. See
+[docs/specs.md](docs/specs.md).
 
 ## License
 
