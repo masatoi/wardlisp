@@ -117,7 +117,8 @@ or how its errors are reported"
             (getf (nth-value 1 (wardlisp:evaluate "(+ 1e400 0)")) :error-type)))))
 
 (deftest test-bindings-accept-only-wardlisp-numbers
-  "Bound numbers must be integers or double-floats within max-integer"
+  "Bound numbers must be integers or finite floats within max-integer; a float
+of any format becomes a double-float"
   (flet ((bound-error (value &rest options)
            (getf (nth-value 1 (apply #'wardlisp:evaluate "x"
                                      :bindings (list (cons "x" value)) options))
@@ -126,7 +127,8 @@ or how its errors are reported"
     (ok (null (bound-error 2.5d0)))
     (ok (eq 'wardlisp-type-error (bound-error 1/3)))
     (ok (eq 'wardlisp-type-error (bound-error #C(1 2))))
-    (ok (eq 'wardlisp-type-error (bound-error 2.5f0)))
+    (ok (null (bound-error 2.5f0)))
+    (ok (eql 2.5d0 (wardlisp:evaluate "x" :bindings '(("x" . 2.5f0)))))
     (ok (eq 'wardlisp-integer-limit-exceeded (bound-error 1000 :max-integer 10)))
     (ok (eq 'wardlisp-integer-limit-exceeded (bound-error -1000.0d0 :max-integer 10)))))
 
@@ -208,6 +210,54 @@ leaves later evaluations working"
   "\"-0.\" is the float -0.0, like \"-0.0\""
   (ok (eql -0.0d0 (wardlisp:evaluate "-0.")))
   (ok (eql -0.0d0 (wardlisp:evaluate "-0.0"))))
+
+(defparameter *dup-definition*
+  "(define (dup n) (if (= n 0) 1 (let ((y (dup (- n 1)))) (list y y))))"
+  "A value of N levels whose printed form has 2^N leaves, from 2N cells.")
+
+(defun evaluate-quickly (code &rest options)
+  "Evaluate CODE with OPTIONS and a short timeout; return the error type and the
+seconds it took."
+  (let ((start (get-internal-real-time)))
+    (multiple-value-bind (value metrics)
+        (apply #'wardlisp:evaluate (format nil "~A ~A" *dup-definition* code)
+               :timeout 30 options)
+      (declare (ignore value))
+      (values (getf metrics :error-type)
+              (/ (- (get-internal-real-time) start) internal-time-units-per-second)
+              metrics))))
+
+(deftest test-shared-structure-is-bounded-by-the-limits
+  "Printing, describing and comparing a value with exponentially shared
+structure is bounded by max-output, the message size and fuel, not by the size
+of its printed form"
+  (multiple-value-bind (type seconds) (evaluate-quickly "(print (dup 60))")
+    (ok (eq 'wardlisp-output-limit-exceeded type))
+    (ok (< seconds 2)))
+  (multiple-value-bind (type seconds metrics) (evaluate-quickly "(+ (dup 60) 1)")
+    (ok (eq 'wardlisp-type-error type))
+    (ok (< seconds 2))
+    (ok (< (length (getf metrics :error-message)) 300)))
+  (multiple-value-bind (type seconds) (evaluate-quickly "(equal? (dup 40) (dup 40))")
+    (ok (eq 'wardlisp-step-limit-exceeded type))
+    (ok (< seconds 5))))
+
+(deftest test-equal-charges-a-step-per-pair
+  "equal? consumes one step per pair of cells it compares"
+  (flet ((steps (code) (getf (nth-value 1 (wardlisp:evaluate code)) :steps-used)))
+    (ok (= 3 (- (steps "(equal? '(1 2 3) '(1 2 3))") (steps "(equal? '() '())"))))))
+
+(deftest test-long-quoted-list
+  "A quoted list's length is limited by max-cons, not by the nesting limit"
+  (let ((code (format nil "(length '(~{~D~^ ~}))" (loop for i below 1200 collect 0))))
+    (ok (eql 1200 (wardlisp:evaluate code)))))
+
+(deftest test-error-messages-use-wardlisp-syntax
+  "Error messages show values and source in wardlisp syntax"
+  (flet ((message (code) (getf (nth-value 1 (wardlisp:evaluate code)) :error-message)))
+    (ok (equal "cond: each clause must be a list, got 1.5" (message "(cond 1.5)")))
+    (ok (equal "let: binding name must be a symbol, got \"x\""
+               (message "(let ((\"x\" 1)) 1)")))))
 
 ;; --- Output limit ---
 (deftest test-output-limit

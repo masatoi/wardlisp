@@ -67,18 +67,20 @@ downcased name, and t and nil cannot be bound."
     ((value (or (range integer -100000 100000) (member 1/3 -5/2 #C(1 2) 2.5f0 1.5d0 -7.25d0)))
      (limit (range integer 1 1000)))
   "Section 17.9: a number injected through :BINDINGS must be an integer or a
-double-float (sections 3.1 and 3.2) -- any other number is a type-error -- and
-is subject to max-integer like any other number (section 11.4)."
+finite float, which becomes a double-float (sections 3.1 and 3.2) -- any other
+number is a type-error -- and is subject to max-integer like any other number
+(section 11.4)."
   (:about evaluate)
   (:kind :invariant)
   (:trials (:smoke 20 :normal 200))
   (multiple-value-bind (seen metrics type)
       (run "x" :bindings (list (cons "x" value)) :max-integer limit)
     (declare (ignore metrics))
-    (cond ((not (wardlisp-number-p value))
+    (cond ((not (or (integerp value) (floatp value)))
            (eq type 'wardlisp/src/types:wardlisp-type-error))
           ((> (abs value) limit)
            (eq type 'wardlisp/src/types:wardlisp-integer-limit-exceeded))
+          ((floatp value) (and (null type) (eql seen (coerce value 'double-float))))
           (t (and (null type) (eql seen value))))))
 
 (defproperty evaluate-is-deterministic
@@ -114,13 +116,20 @@ same :RANDOM-SEED gives the same sequence in every evaluation."
   "Float traps unlike the ones wardlisp runs under: underflow traps too.  Paired
 with rounding toward positive infinity in the host-environment property.")
 
+(defparameter *message-probes*
+  '("(random -31)" "(let 31 1)" "(cond 1.5)" "(let ((\"x\" 1)) 1)" "(+ 1 '(2 3))"
+    "(* 99999 99999)" "(* 1e10 1e10)" "(undefined-thing 1)" "(car 2.5)")
+  "Programs whose error messages print integers, floats, strings, lists and
+source fragments; run with max-integer 1000.")
+
 (defproperty evaluate-ignores-host-dynamic-environment
     ((code program-text)
      (seed (range integer 0 1000)))
   "Sections 1 and 13.1: what a program means does not depend on the host's
 reader and printer variables, readtable, floating-point traps or rounding mode.
-Under unusual host settings the program, and a fixed float probe whose result
-depends on rounding, give the same results and metrics as under standard ones,
+Under unusual host settings the program, a fixed float probe whose result
+depends on rounding, and *MESSAGE-PROBES*, whose error messages print numbers,
+floats and source, give the same results and metrics as under standard ones,
 and the host's float modes are as they were afterwards."
   (:about evaluate)
   (:kind :invariant)
@@ -128,7 +137,12 @@ and the host's float modes are as they were afterwards."
   (flet ((both ()
            (multiple-value-bind (value metrics) (run code :fuel 5000 :random-seed seed)
              (list (print-value value) metrics
-                   (print-value (run "(list (/ 1 3) (* 1.1 1.1) (/ 2.0 3.0))"))))))
+                   (print-value (run "(list (/ 1 3) (* 1.1 1.1) (/ 2.0 3.0))"))
+                   (mapcar (lambda (probe) (nth-value 1 (run probe :max-integer 1000)))
+                           *message-probes*)
+                   ;; Messages about host arguments name their host type.
+                   (nth-value 1 (run 42))
+                   (nth-value 1 (run "1" :bindings '((x . 1))))))))
     (let ((expected (both))
           (saved (sb-int:get-floating-point-modes)))
       (unwind-protect
@@ -296,7 +310,7 @@ quoted it evaluates to that symbol."
     ((parts float-literal))
   "Section 2.5.2: every float literal shape -- \"12.\", \"12.5\", \".5\", \"12e3\"
 and their combinations, signed or not -- reads as the double-float nearest to
-the decimal number it writes."
+the decimal number it writes, with the sign of a written zero kept."
   (:about evaluate)
   (:kind :model)
   (:trials (:smoke 30 :normal 300))
@@ -311,7 +325,9 @@ the decimal number it writes."
       (multiple-value-bind (value metrics) (run text :max-integer (expt 10 400))
         (and (succeeded-p metrics)
              (typep value 'double-float)
-             (= value (float exact 1d0)))))))
+             (eql value (if (and (zerop exact) (string= sign "-"))
+                            -0.0d0
+                            (float exact 1d0))))))))
 
 (defun misuse-arities (arity)
   "Return the argument counts to try for a builtin of ARITY: the right ones and
@@ -414,6 +430,59 @@ allowed, and nothing else is ever reported."
              (eq type 'wardlisp/src/types:wardlisp-integer-limit-exceeded))
             (t
              (member type '(nil wardlisp/src/types:wardlisp-integer-limit-exceeded)))))))
+
+(defproperty integer-to-float-overflow-is-a-number-limit
+    ((factors (range integer 1 6))
+     (float wide-float-literal)
+     (operator (member :add :subtract :multiply :divide)))
+  "Section 11.4: converting an integer beyond double-float range to a float, as
+mixed arithmetic does, is integer-limit-exceeded however large max-integer is;
+an integer within range combines with the float normally."
+  (:about evaluate)
+  (:kind :model)
+  (:trials (:smoke 20 :normal 200))
+  (let* ((big (expt 10 (* 90 factors)))
+         (code (format nil "(~A (* ~{~A~^ ~}) ~A)"
+                       (ecase operator (:add "+") (:subtract "-") (:multiply "*") (:divide "/"))
+                       (make-list factors :initial-element (expt 10 90))
+                       float))
+         (type (nth-value 2 (run code :max-integer (expt 10 1000)))))
+    (if (> big (rational most-positive-double-float))
+        (eq type 'wardlisp/src/types:wardlisp-integer-limit-exceeded)
+        (member type '(nil wardlisp/src/types:wardlisp-integer-limit-exceeded)))))
+
+(defun shared-tree-print-length (levels)
+  "Return the length of the printed form of (dup LEVELS): 1 for a leaf, and
+\"(\" child \" \" child \")\" for each level above."
+  (if (zerop levels) 1 (+ 3 (* 2 (shared-tree-print-length (1- levels))))))
+
+(defparameter *dup-definition*
+  "(define (dup n) (if (= n 0) 1 (let ((y (dup (- n 1)))) (list y y))))"
+  "A value of N levels from 2N cells whose printed form has 2^N leaves.")
+
+(defproperty shared-structure-is-bounded-by-the-limits
+    ((levels (range integer 1 60)))
+  "Sections 7.4, 11.1 and 11.5: printing a value is bounded by max-output and
+comparing values is bounded by fuel, so a value that shares structure, whose
+printed form is exponential in its size, prints exactly when that form fits
+and otherwise fails with the matching limit error, and equal? on it succeeds or
+runs out of steps."
+  (:about evaluate print-value)
+  (:kind :invariant)
+  (:trials (:smoke 20 :normal 60))
+  (let ((fits (<= (1+ (shared-tree-print-length levels)) 1000)))
+    (multiple-value-bind (value metrics type)
+        (run (format nil "~A (print (dup ~D))" *dup-definition* levels))
+      (declare (ignore value))
+      (and (if fits
+               (and (null type)
+                    (= (length (getf metrics :output)) (1+ (shared-tree-print-length levels))))
+               (eq type 'wardlisp/src/types:wardlisp-output-limit-exceeded))
+           (member (nth-value 2 (run (format nil "~A (equal? (dup ~D) (dup ~D))"
+                                             *dup-definition* levels levels)))
+                   '(nil wardlisp/src/types:wardlisp-step-limit-exceeded))
+           (member (nth-value 2 (run (format nil "~A (+ (dup ~D) 1)" *dup-definition* levels)))
+                   '(wardlisp/src/types:wardlisp-type-error))))))
 
 (defproperty quotient-and-mod-truncate-toward-zero
     ((a (range integer -1000000 1000000))

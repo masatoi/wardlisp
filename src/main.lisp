@@ -19,9 +19,9 @@
            #:wardlisp-timeout-exceeded))
 (in-package :wardlisp)
 
-(defun finite-double-float-p (value)
-  "True if VALUE is a double-float that is neither an infinity nor a NaN."
-  (and (typep value 'double-float)
+(defun finite-float-p (value)
+  "True if VALUE is a float that is neither an infinity nor a NaN."
+  (and (floatp value)
        (not (sb-ext:float-infinity-p value))
        (not (sb-ext:float-nan-p value))))
 
@@ -48,12 +48,12 @@ timeout an evaluation could need.")
 
 (defun valid-binding-value-p (value)
   "True if VALUE is a value the host may inject via EVALUATE's :bindings."
-  ;; Atoms only: integer, double-float, t, nil, symbol (CL string), or boxed
-  ;; string. Other CL numbers (ratios, complexes, single-floats) are not
-  ;; wardlisp values, and compound ocons values are rejected -- the public API
-  ;; exports no ocons constructor and their contents would be unvalidated host
-  ;; objects.
-  (or (integerp value) (finite-double-float-p value) (eq value t) (null value)
+  ;; Atoms only: integer, finite float (converted to double-float on the way
+  ;; in), t, nil, symbol (CL string), or boxed string. Other CL numbers (ratios,
+  ;; complexes) are not wardlisp values, and compound ocons values are rejected
+  ;; -- the public API exports no ocons constructor and their contents would be
+  ;; unvalidated host objects.
+  (or (integerp value) (finite-float-p value) (eq value t) (null value)
       (stringp value) (wstring-p value)))
 
 (defun build-binding-frame (bindings ctx)
@@ -80,6 +80,8 @@ a number beyond CTX's max-integer."
         (unless (valid-binding-value-p value)
           (error 'wardlisp-type-error
                  :message (format nil ":bindings: unsupported value for ~a" name)))
+        (when (floatp value)
+          (setf value (coerce value 'double-float)))
         (when (numberp value)
           (check-integer ctx value))
         (push (cons (string-downcase name) value) frame)))))

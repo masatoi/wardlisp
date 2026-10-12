@@ -101,10 +101,20 @@ car and cdr are such values.  No other host object may come out of EVALUATE."
     t))
 
 (defun datum-numbers (value)
-  "Return every number reachable from the data VALUE."
-  (cond ((numberp value) (list value))
-        ((ocons-p value) (mapcan #'datum-numbers (ocons-elements value)))
-        (t nil)))
+  "Return every number reachable from VALUE through pairs, in car and cdr
+positions alike, so a dotted pair's cdr is not missed.  Visits each pair once,
+however often it is shared."
+  (let ((pending (list value))
+        (seen (make-hash-table :test #'eq))
+        (numbers nil))
+    (loop while pending
+          do (let ((item (pop pending)))
+               (cond ((numberp item) (push item numbers))
+                     ((and (ocons-p item) (not (gethash item seen)))
+                      (setf (gethash item seen) t)
+                      (push (ocons-ocar item) pending)
+                      (push (ocons-ocdr item) pending)))))
+    numbers))
 
 ;;; --- Random data ---
 

@@ -30,7 +30,7 @@ WardLisp is a Lisp-1 (like Scheme: functions and variables share a single namesp
 
 ### Special Forms
 
-`quote`, `if`, `let` (sequential binding), `lambda`, `define`, `cond`, `and`, `or`, `begin`, `apply`
+`quote`, `if`, `let` (parallel binding), `let*` (sequential binding), `lambda`, `define`, `cond`, `and`, `or`, `begin`, `apply`
 
 ### Builtins
 
@@ -90,9 +90,11 @@ Every failure a program can cause is reported as one of WardLisp's own error typ
 | Wall-clock time | 5 seconds | `timeout-exceeded` |
 
 The default fuel of 1,000,000 steps is spent in a few tens of milliseconds by
-typical programs, and in a few seconds at most by a program built to make each
-step expensive (repeated `equal?`, `length` or `apply` on long lists). The timeout is what bounds
-wall-clock time.
+typical programs. The work behind one step is bounded too: `equal?` costs a
+step per pair it compares, `print` stops at the output limit, error messages cut
+values at 200 characters, and list operations are bounded by `max-cons` (a
+program repeating `apply` on long lists took about 2.3 seconds for 1,000,000
+steps). The timeout is what bounds wall-clock time.
 
 ## Usage
 

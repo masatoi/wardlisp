@@ -42,6 +42,8 @@
     builtins-contain-misuse
     evaluate-contains-malformed-host-arguments
     float-overflow-is-a-number-limit
+    integer-to-float-overflow-is-a-number-limit
+    shared-structure-is-bounded-by-the-limits
     quotient-and-mod-truncate-toward-zero
     quoted-data-round-trip-through-print-value
     equal?-is-structural-equality
@@ -265,6 +267,8 @@ before out-of-range literals were classified."
      (:property builtins-contain-misuse))
     (wardlisp/src/reader::parse-float-token mutant-parse-float-token-keeping-integers
      (:property float-literals-denote-their-decimal-value))
+    (wardlisp::call-with-sandbox-host-environment mutant-float-modes-only
+     (:property evaluate-ignores-host-dynamic-environment))
     (wardlisp/src/builtins::builtin-string-length mutant-builtin-string-length
      (:property lengths-respect-max-integer) (:function-spec evaluate))
     ;; Last: an unbounded timeout can corrupt the host's timer queue for the
@@ -299,6 +303,17 @@ generated, the backend refused -- caught nothing."
   "CALL-WITH-SANDBOX-HOST-ENVIRONMENT that runs in whatever environment the
 caller set."
   (funcall thunk))
+
+(defun mutant-float-modes-only (thunk)
+  "CALL-WITH-SANDBOX-HOST-ENVIRONMENT that pins the float modes but leaves the
+caller's reader and printer variables in place."
+  (let ((saved (sb-int:get-floating-point-modes)))
+    (unwind-protect
+         (progn
+           (sb-int:set-floating-point-modes :traps '(:overflow :invalid :divide-by-zero)
+                                            :rounding-mode :nearest)
+           (funcall thunk))
+      (apply #'sb-int:set-floating-point-modes saved))))
 
 (defun mutant-ascii-digit-p (ch)
   "ASCII-DIGIT-P that accepts every Unicode decimal digit, as DIGIT-CHAR-P does."

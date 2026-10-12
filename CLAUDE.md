@@ -91,7 +91,7 @@ prompts/           System prompts for AI agents
 - **TCO**: Trampoline via `tail-call` structs with `:expr`/`:body` kinds
 - **Local define**: Scheme-style letrec* in body head position (lambda, define, let, let*)
 - **Resource limits**: fuel, max-depth, max-cons, max-output, max-integer, timeout
-- **Builtin protection**: First env frame is builtins, `top-level-update-or-append` skips it
+- **Builtin protection**: The env's last frame holds the builtins (frame 0 is the user/bindings frame); `top-level-update-or-append` never writes into it
 - **Contracts are opt-in**: `wardlisp` never depends on cl-spec; only `wardlisp/specs` does
 
 ## Code Style
