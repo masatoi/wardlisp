@@ -100,7 +100,7 @@ Use wardlisp-eval when you need a fully resolved value."
           ((string= head "if")     (eval-if args env ctx))
           ((string= head "let")    (eval-let args env ctx))
           ((string= head "let*")   (eval-let* args env ctx))
-          ((string= head "lambda") (eval-lambda args env))
+          ((string= head "lambda") (eval-lambda args env ctx))
           ((string= head "define")
            (error 'wardlisp-parse-error
                   :message "define is only allowed at top level or at the beginning of a body"))
@@ -207,8 +207,19 @@ Then/else branches are in tail position (use eval-inner)."
               (env-extend current-env (list (first binding)) (list val)))))
     (eval-body-forms body current-env ctx)))
 
-(defun eval-lambda (args env)
-  "Evaluate a lambda form, creating a closure."
+(defun check-distinct-names (names message)
+  "Signal a parse-error, MESSAGE followed by the name, if NAMES (strings)
+contains a duplicate.  Linear in the number of names."
+  (let ((seen (make-hash-table :test #'equal)))
+    (dolist (name names)
+      (when (gethash name seen)
+        (error 'wardlisp-parse-error :message (format nil "~a: ~a" message name)))
+      (setf (gethash name seen) t))))
+
+(defun eval-lambda (args env ctx)
+  "Evaluate a lambda form, creating a closure.  Charges one step per parameter,
+so re-evaluating a lambda with many parameters costs fuel in proportion to the
+work it does."
   (when (< (length args) 2)
     (error 'wardlisp-arity-error :message "lambda requires params and body"))
   (let ((params (first args))
@@ -221,12 +232,8 @@ Then/else branches are in tail position (use eval-inner)."
       (unless (stringp p)
         (error 'wardlisp-parse-error :message
                (format nil "lambda: param must be a symbol, got ~a" (describe-form p)))))
-    (let ((seen nil))
-      (dolist (p params)
-        (when (member p seen :test #'string=)
-          (error 'wardlisp-parse-error :message
-                 (format nil "lambda: duplicate parameter name: ~a" p)))
-        (push p seen)))
+    (consume-fuel ctx (length params))
+    (check-distinct-names params "lambda: duplicate parameter name")
     (make-closure params body env)))
 
 (defun validate-define-target (target context)
@@ -246,12 +253,7 @@ Then/else branches are in tail position (use eval-inner)."
            (error 'wardlisp-parse-error :message
                   (format nil "~a: parameter must be a symbol, got ~a"
                           context (describe-form p)))))
-       (let ((seen nil))
-         (dolist (p params)
-           (when (member p seen :test #'string=)
-             (error 'wardlisp-parse-error :message
-                    (format nil "~a: duplicate parameter name: ~a" context p)))
-           (push p seen)))
+       (check-distinct-names params (format nil "~a: duplicate parameter name" context))
        name))
     ((stringp target)
      (check-not-boolean context target)
@@ -320,15 +322,12 @@ Signals parse-error if a define appears after the first non-define expression."
     (values (nreverse defs) (nreverse exprs))))
 
 (defun ensure-distinct-define-names (defs)
-  "Reject duplicate names in a single internal define block."
-  (let ((seen nil))
-    (dolist (form defs)
-      (let* ((target (second form))
-             (name (validate-define-target target "define")))
-        (when (member name seen :test #'string=)
-          (error 'wardlisp-parse-error
-                 :message (format nil "duplicate define name in body: ~a" name)))
-        (push name seen)))))
+  "Reject duplicate names in a single internal define block, and return the
+names in order.  Linear in the number of definitions."
+  (let ((names (mapcar (lambda (form) (validate-define-target (second form) "define"))
+                       defs)))
+    (check-distinct-names names "duplicate define name in body")
+    names))
 
 (defun eval-body-forms (body env ctx)
   "Evaluate BODY in a definition context.
@@ -340,10 +339,10 @@ Leading define forms are processed with letrec* semantics."
     (if (null defs)
         (eval-sequence exprs env ctx)
         (progn
-          (ensure-distinct-define-names defs)
-          (let* ((names (mapcar (lambda (form)
-                                  (validate-define-target (second form) "define"))
-                                defs))
+          ;; One step per definition, so a body with many leading defines that
+          ;; runs repeatedly costs fuel in proportion to the work it does.
+          (consume-fuel ctx (length defs))
+          (let* ((names (ensure-distinct-define-names defs))
                  (placeholders (make-list (length names)
                                           :initial-element +uninitialized-binding+))
                  (local-env (env-extend env names placeholders)))

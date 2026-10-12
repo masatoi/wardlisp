@@ -259,6 +259,44 @@ of its printed form"
     (ok (equal "let: binding name must be a symbol, got \"x\""
                (message "(let ((\"x\" 1)) 1)")))))
 
+(deftest test-deeply-nested-quotes-are-parse-errors
+  "Quote nesting counts towards the reader's nesting limit, like list nesting"
+  (let ((code (concatenate 'string (make-string 60000 :initial-element #\') "x")))
+    (ok (eq 'wardlisp-parse-error
+            (getf (nth-value 1 (wardlisp:evaluate code)) :error-type)))))
+
+(defun many-names (prefix count)
+  "Return COUNT distinct symbol names PREFIX0 ... joined by spaces."
+  (format nil "~{~A~^ ~}" (loop for i below count collect (format nil "~A~D" prefix i))))
+
+(deftest test-wide-binding-forms-are-charged
+  "Evaluating a lambda or a body's leading defines charges a step per name, so
+a loop that re-evaluates a wide one is bounded by fuel and does linear work"
+  (let ((lambda-loop
+          (format nil "(define (spin n) (if (= n 0) 0 (begin (lambda (~A) 1) (spin (- n 1)))))
+(spin 1000000)" (many-names "p" 500)))
+        (define-loop
+          (format nil "(define (spin n) ~{(define (~A) 1) ~}(if (= n 0) 0 (spin (- n 1))))
+(spin 1000000)" (loop for i below 300 collect (format nil "d~D" i)))))
+    (dolist (code (list lambda-loop define-loop))
+      (ok (eq 'wardlisp-step-limit-exceeded
+              (getf (nth-value 1 (wardlisp:evaluate code :fuel 200000)) :error-type)))))
+  (flet ((steps (code) (getf (nth-value 1 (wardlisp:evaluate code)) :steps-used)))
+    (ok (= 4 (- (steps "(lambda (a b c d e) 1)") (steps "(lambda (a) 1)"))))))
+
+(deftest test-string-value-error-is-bounded
+  "string-value's error message is cut like every other"
+  (let ((value (wardlisp:evaluate (format nil "~A (dup 40)" *dup-definition*))))
+    (ok (handler-case (progn (wardlisp:string-value value) nil)
+          (wardlisp-type-error (e) (< (length (wardlisp-error-message e)) 300))))))
+
+(deftest test-equal-depth-counts-nesting-not-length
+  "equal? compares lists longer than its nesting limit"
+  (ok (eq t (wardlisp:evaluate
+             "(define (build n acc) (if (= n 0) acc (build (- n 1) (cons n acc))))
+(equal? (build 10001 nil) (build 10001 nil))"
+             :max-cons 100000))))
+
 ;; --- Output limit ---
 (deftest test-output-limit
   (ok (signals

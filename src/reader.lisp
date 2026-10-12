@@ -39,7 +39,9 @@
            (error 'wardlisp-parse-error :message
                   (format nil "Unexpected closing parenthesis at ~a"
                           (pos-to-location input pos))))
-          ((char= ch #\') (read-quote input (1+ pos) depth))
+          ;; A quote nests its datum one level deeper, so it counts towards
+          ;; the nesting limit like a list does.
+          ((char= ch #\') (read-quote input (1+ pos) (1+ depth)))
           ((char= ch #\#)
            (error 'wardlisp-parse-error :message
                   (format nil "Reader macros (#) are not allowed at ~a"
@@ -68,7 +70,12 @@
             (setf pos new-pos)))))
 
 (defun read-quote (input pos &optional (depth 0))
-  "Parse quoted expression after quote character."
+  "Parse quoted expression after quote character.  DEPTH counts the quote as a
+nesting level, so '''...x cannot recurse past the nesting limit."
+  (when (> depth +max-parse-depth+)
+    (error 'wardlisp-parse-error :message
+           (format nil "Nesting depth ~d exceeds limit ~d" depth
+                   +max-parse-depth+)))
   (multiple-value-bind (expr new-pos) (read-expr input pos depth)
     (values (list "quote" expr) new-pos)))
 

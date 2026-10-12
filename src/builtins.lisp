@@ -318,9 +318,9 @@ one step of CTX's fuel per pair of cells compared."
        (consume-fuel ctx)
        (unless (wardlisp-equal (ocons-ocar a) (ocons-ocar b) (1+ depth) ctx)
          (return nil))
+       ;; Following the cdr is iteration, not nesting: DEPTH is unchanged.
        (setf a (ocons-ocdr a))
-       (setf b (ocons-ocdr b))
-       (incf depth))
+       (setf b (ocons-ocdr b)))
       (t (return nil)))))
 
 (defun builtin-print (args ctx)
@@ -401,12 +401,15 @@ to max-integer like any other number."
   (:documentation "Signalled by EMIT when *PRINT-REMAINING* runs out."))
 
 (defun emit (text stream)
-  "Write TEXT to STREAM, charging it to *PRINT-REMAINING*.  Text that would
-overdraw the budget is not written; PRINT-LIMIT-REACHED is signalled instead."
+  "Write TEXT to STREAM, charging it to *PRINT-REMAINING*.  When TEXT would
+overdraw the budget, only the part that fits is written and PRINT-LIMIT-REACHED
+is signalled, so a long atom is cut rather than dropped."
   (when *print-remaining*
-    (decf *print-remaining* (length text))
-    (when (minusp *print-remaining*)
-      (error 'print-limit-reached)))
+    (when (> (length text) *print-remaining*)
+      (write-string text stream :end *print-remaining*)
+      (setf *print-remaining* 0)
+      (error 'print-limit-reached))
+    (decf *print-remaining* (length text)))
   (write-string text stream))
 
 (defun write-value (value stream depth)

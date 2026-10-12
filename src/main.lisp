@@ -163,11 +163,13 @@ afterwards."
                          (make-metrics ctx :error-type 'wardlisp-timeout-exceeded
                                        :error-message
                                        (format nil "Evaluation timed out after ~
-                                                    ~:[~f~;~d~] second~:[s~;~]"
-                                               (integerp timeout)
-                                               (if (integerp timeout)
-                                                   timeout
-                                                   (float timeout 1d0))
+                                                    ~a second~:[s~;~]"
+                                               (describe-value
+                                                (if (rationalp timeout)
+                                                    (if (integerp timeout)
+                                                        timeout
+                                                        (float timeout 1d0))
+                                                    timeout))
                                                (eql timeout 1)))))
                (serious-condition (e)
                  (values nil
@@ -247,7 +249,7 @@ Signals a type error if VALUE is not a string."
   (unless (wstring-p value)
     (error 'wardlisp-type-error
            :message (format nil "string-value: not a string: ~a"
-                            (print-value value))))
+                            (describe-value value))))
   ;; Copy on egress (symmetric with make-string-value's ingress copy) so a host
   ;; mutating the returned string cannot corrupt the shared wstring.
   (copy-seq (wstring-value value)))

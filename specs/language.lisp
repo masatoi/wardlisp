@@ -306,6 +306,24 @@ quoted it evaluates to that symbol."
          (string= quoted (string-downcase token))
          (eq 'wardlisp/src/types:wardlisp-name-error (nth-value 2 (run token))))))
 
+(defproperty nesting-beyond-the-limit-is-a-parse-error
+    ((levels (or (range integer 1 1000) (range integer 1001 60000)))
+     (kind (member :quotes :lists)))
+  "Section 2 and 12: source nested deeper than the reader's limit of 1000 --
+by quotes or by parentheses -- is a parse-error, never a host stack overflow;
+shallower nesting reads and evaluates."
+  (:about evaluate)
+  (:kind :invariant)
+  (:trials (:smoke 10 :normal 60))
+  (let* ((code (ecase kind
+                 (:quotes (concatenate 'string (make-string levels :initial-element #\') "x"))
+                 (:lists (concatenate 'string "'" (make-string levels :initial-element #\()
+                                      (make-string levels :initial-element #\))))))
+         (type (nth-value 2 (run code))))
+    (cond ((<= levels 900) (null type))
+          ((> levels 1001) (eq type 'wardlisp/src/types:wardlisp-parse-error))
+          (t (member type '(nil wardlisp/src/types:wardlisp-parse-error))))))
+
 (defproperty float-literals-denote-their-decimal-value
     ((parts float-literal))
   "Section 2.5.2: every float literal shape -- \"12.\", \"12.5\", \".5\", \"12e3\"
@@ -436,20 +454,33 @@ allowed, and nothing else is ever reported."
      (float wide-float-literal)
      (operator (member :add :subtract :multiply :divide)))
   "Section 11.4: converting an integer beyond double-float range to a float, as
-mixed arithmetic does, is integer-limit-exceeded however large max-integer is;
-an integer within range combines with the float normally."
+mixed arithmetic does, is integer-limit-exceeded however large max-integer is.
+An integer within range combines with the float as a double-float, and gives
+the same result as the host's mixed arithmetic while that result is well inside
+the range."
   (:about evaluate)
   (:kind :model)
   (:trials (:smoke 20 :normal 200))
   (let* ((big (expt 10 (* 90 factors)))
+         (other (wardlisp-read float))
+         (function (ecase operator (:add #'+) (:subtract #'-) (:multiply #'*) (:divide #'/)))
+         (bound (rational most-positive-double-float))
+         (exact (abs (funcall function big (rational other))))
          (code (format nil "(~A (* ~{~A~^ ~}) ~A)"
                        (ecase operator (:add "+") (:subtract "-") (:multiply "*") (:divide "/"))
                        (make-list factors :initial-element (expt 10 90))
-                       float))
-         (type (nth-value 2 (run code :max-integer (expt 10 1000)))))
-    (if (> big (rational most-positive-double-float))
-        (eq type 'wardlisp/src/types:wardlisp-integer-limit-exceeded)
-        (member type '(nil wardlisp/src/types:wardlisp-integer-limit-exceeded)))))
+                       float)))
+    (multiple-value-bind (value metrics type) (run code :max-integer (expt 10 1000))
+      (declare (ignore metrics))
+      (cond ((> big bound)
+             (eq type 'wardlisp/src/types:wardlisp-integer-limit-exceeded))
+            ((< exact (/ bound 2))
+             (and (null type)
+                  (typep value 'double-float)
+                  (eql value (funcall function (coerce big 'double-float) other))))
+            ((> exact (* bound 2))
+             (eq type 'wardlisp/src/types:wardlisp-integer-limit-exceeded))
+            (t (member type '(nil wardlisp/src/types:wardlisp-integer-limit-exceeded)))))))
 
 (defun shared-tree-print-length (levels)
   "Return the length of the printed form of (dup LEVELS): 1 for a leaf, and

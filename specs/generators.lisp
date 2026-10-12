@@ -87,13 +87,17 @@ CL string), a boxed string, or a proper list of data values."
 (defun wardlisp-value-p (value)
   "True when VALUE is a value a wardlisp program can produce (section 3): a
 number, T, NIL, a symbol, a boxed string, a closure, a builtin, or a pair whose
-car and cdr are such values.  No other host object may come out of EVALUATE."
-  (let ((pending (list value)))
+car and cdr are such values.  No other host object may come out of EVALUATE.
+Visits each pair once, however often it is shared."
+  (let ((pending (list value))
+        (seen (make-hash-table :test #'eq)))
     (loop while pending
           do (let ((item (pop pending)))
                (cond ((ocons-p item)
-                      (push (ocons-ocar item) pending)
-                      (push (ocons-ocdr item) pending))
+                      (unless (gethash item seen)
+                        (setf (gethash item seen) t)
+                        (push (ocons-ocar item) pending)
+                        (push (ocons-ocdr item) pending)))
                      ((not (or (wardlisp-number-p item) (eq item t) (null item)
                                (stringp item) (wstring-p item)
                                (closure-p item) (builtin-p item)))
