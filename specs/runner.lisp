@@ -37,6 +37,9 @@
     integer-arithmetic-agrees-with-common-lisp
     out-of-range-float-literals-are-parse-errors
     non-ascii-digits-are-symbol-characters
+    float-literals-denote-their-decimal-value
+    builtins-contain-misuse
+    evaluate-contains-malformed-host-arguments
     float-overflow-is-a-number-limit
     quotient-and-mod-truncate-toward-zero
     quoted-data-round-trip-through-print-value
@@ -254,9 +257,19 @@ before out-of-range literals were classified."
      mutant-call-with-sandbox-host-environment
      (:property evaluate-ignores-host-dynamic-environment))
     (wardlisp/src/reader::ascii-digit-p mutant-ascii-digit-p
-     (:property non-ascii-digits-are-symbol-characters)))
+     (:property non-ascii-digits-are-symbol-characters))
+    (wardlisp/src/builtins::builtin-car mutant-builtin-car
+     (:property builtins-contain-misuse))
+    (wardlisp/src/builtins::ensure-number mutant-ensure-number
+     (:property builtins-contain-misuse))
+    (wardlisp/src/reader::parse-float-token mutant-parse-float-token-keeping-integers
+     (:property float-literals-denote-their-decimal-value))
+    ;; Last: an unbounded timeout can corrupt the host's timer queue for the
+    ;; rest of the process, which would make every later check fail.
+    (wardlisp::valid-timeout-p mutant-valid-timeout-p
+     (:property evaluate-contains-malformed-host-arguments)))
   "Each entry is (FUNCTION MUTANT . TARGETS): a wrong implementation of
-FUNCTION, and the targets that must catch it.")
+FUNCTION, and the targets that must catch it.  They run in order.")
 
 (defun call-with-mutant (function mutant thunk)
   "Call THUNK with FUNCTION's global definition replaced by MUTANT's, restoring
@@ -287,6 +300,28 @@ caller set."
 (defun mutant-ascii-digit-p (ch)
   "ASCII-DIGIT-P that accepts every Unicode decimal digit, as DIGIT-CHAR-P does."
   (and (digit-char-p ch) t))
+
+(defun mutant-builtin-car (args ctx)
+  "The car builtin without its type check: a non-pair reaches the host accessor."
+  (declare (ignore ctx))
+  (let ((value (first args)))
+    (if (null value) nil (ocons-ocar value))))
+
+(defun mutant-ensure-number (name value)
+  "ENSURE-NUMBER that signals a host TYPE-ERROR instead of a wardlisp one."
+  (declare (ignore name))
+  (check-type value number))
+
+(defun mutant-parse-float-token-keeping-integers (token)
+  "PARSE-FLOAT-TOKEN that keeps the host reader's integer for \"1.\"."
+  (with-standard-io-syntax
+    (let ((*read-default-float-format* 'double-float)
+          (*read-eval* nil))
+      (read-from-string token))))
+
+(defun mutant-valid-timeout-p (timeout)
+  "VALID-TIMEOUT-P with neither the NaN guard nor the upper bound."
+  (and (realp timeout) (plusp timeout)))
 
 (defun run-negative-control (&key (seeds *default-seeds*))
   "Run each mutant's targets with the mutant in place and return a report whose

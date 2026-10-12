@@ -30,7 +30,7 @@ seeds and budgets that ran. It is not a proof.
 
 | Function | Function Spec | Properties |
 |---|---|---|
-| `evaluate` | never signals; metrics have the shape of §13.2; success has no error, failure returns `nil` with a documented error type and a message (§12, §13); never reports `internal-error`, so no host error escapes (§1, §12); a success returns a wardlisp value -- an integer, a double-float, `t`, `nil`, a symbol, a string, a closure, a builtin or a pair of such -- never a host object (§3); `steps-used + fuel-remaining = fuel` (§11.1); output never exceeds `max-output`; a success stays inside every limit; a step/memory limit error is witnessed by its counter; no number in a result exceeds `max-integer` (§3, §11.4). Covers calls that pass `fuel`, `max-depth`, `max-cons`, `max-output`, `max-integer` and `random-seed` explicitly; `timeout` is left at its default. | `evaluate-reports-invalid-arguments`, `evaluate-default-fuel-is-documented`, `evaluate-sees-host-bindings`, `evaluate-checks-bound-numbers`, `evaluate-is-deterministic`, `seeded-random-is-reproducible`, `evaluate-ignores-host-dynamic-environment`, `step-limit-is-exact`, `memory-limit-is-exact`, `recursion-limit-is-exact`, `output-limit-is-exact`, `integer-arithmetic-agrees-with-common-lisp`, `out-of-range-float-literals-are-parse-errors`, `non-ascii-digits-are-symbol-characters`, `float-overflow-is-a-number-limit`, `quotient-and-mod-truncate-toward-zero`, `quoted-data-round-trip-through-print-value`, `equal?-is-structural-equality`, `evaluate-results-carry-host-strings` |
+| `evaluate` | never signals; metrics have the shape of §13.2; success has no error, failure returns `nil` with a documented error type and a message (§12, §13); never reports `internal-error`, so no host error escapes (§1, §12); a success returns a wardlisp value -- an integer, a double-float, `t`, `nil`, a symbol, a string, a closure, a builtin or a pair of such -- never a host object (§3); `steps-used + fuel-remaining = fuel` (§11.1); output never exceeds `max-output`; a success stays inside every limit; a step/memory limit error is witnessed by its counter; no number in a result exceeds `max-integer` (§3, §11.4). Covers calls that pass `fuel`, `max-depth`, `max-cons`, `max-output`, `max-integer` and `random-seed` explicitly; `timeout` is left at its default. | `evaluate-reports-invalid-arguments`, `evaluate-default-fuel-is-documented`, `evaluate-sees-host-bindings`, `evaluate-checks-bound-numbers`, `evaluate-is-deterministic`, `seeded-random-is-reproducible`, `evaluate-ignores-host-dynamic-environment`, `evaluate-contains-malformed-host-arguments`, `builtins-contain-misuse`, `step-limit-is-exact`, `memory-limit-is-exact`, `recursion-limit-is-exact`, `output-limit-is-exact`, `integer-arithmetic-agrees-with-common-lisp`, `out-of-range-float-literals-are-parse-errors`, `non-ascii-digits-are-symbol-characters`, `float-literals-denote-their-decimal-value`, `float-overflow-is-a-number-limit`, `quotient-and-mod-truncate-toward-zero`, `quoted-data-round-trip-through-print-value`, `equal?-is-structural-equality`, `evaluate-results-carry-host-strings` |
 | `print-value` | six cases by type (§10, §17.3): integer in decimal; float as a plain decimal fraction (a point, at least one digit after it, no exponent) whose exact value rounds back to the float, over magnitudes from 1e-300 to 1e300; `t`/`nil`; symbol bare; string quoted and reads back; list in parentheses | `quoted-data-round-trip-through-print-value`, `equal?-is-structural-equality` |
 | `make-string-value` | a CL string gives a string value with equal contents and its own storage; anything else signals `wardlisp-type-error` (§17.8) | `host-strings-are-copied-both-ways`, `evaluate-results-carry-host-strings` |
 | `string-value` | a string value gives a fresh CL string of its contents; anything else signals `wardlisp-type-error` (§17.8) | the same two |
@@ -79,9 +79,10 @@ run (load error, unknown mode, or wardlisp loaded from another checkout).
 The runner checks every target under the seeds `1`, `42` and `20261012`,
 Properties under profile `:normal` and Function Specs with 200 trials. A run
 counts as passed only with status `:passed`, a positive trial count, a measured
-rejection count below it (Function Specs), and every declared case reached. It
-also fails when a listed target is not registered or a registered Property of
-the package is missing from `property-names`.
+rejection count of at most half of it (Function Specs), and every declared case
+reached. It also fails when a listed target is not registered, a registered
+Property of the package is missing from `property-names`, or a registered
+Function Spec on a wardlisp function is missing from `contract-names`.
 
 ### Negative control
 
@@ -100,6 +101,10 @@ requires that each is caught under every seed:
 | `random` that ignores `:random-seed` | `seeded-random-is-reproducible`, `evaluate-is-deterministic` |
 | `call-with-sandbox-host-environment` that runs in the caller's environment | `evaluate-ignores-host-dynamic-environment` |
 | `ascii-digit-p` that accepts every Unicode digit | `non-ascii-digits-are-symbol-characters` |
+| `car` without its type check | `builtins-contain-misuse` |
+| `ensure-number` that signals a host `type-error` | `builtins-contain-misuse` |
+| `parse-float-token` that keeps the host reader's integer for `1.` | `float-literals-denote-their-decimal-value` |
+| `valid-timeout-p` without the NaN guard and the upper bound (runs last: it can break the host's timers for the rest of the process) | `evaluate-contains-malformed-host-arguments` |
 
 A mutant counts as caught only when a run reaches a verdict against it --
 status `failed` (a counterexample) or `error` (the target signalled in a trial).
@@ -136,5 +141,12 @@ commit, after running the bundle against the new revision.
   a letter.
 - Closures and builtins are covered only as permitted results; `random`
   without a seed is not covered.
-- Floats are generated only up to 1000 in magnitude with three decimals.
+- Floats in data values are generated up to 1000 in magnitude with three
+  decimals, except for the `print-value` contract, the float-literal and
+  float-overflow properties and the builtin probes, which reach magnitudes of
+  1e-300 to 1e300.
+- `string-value-p`, `symbol-value-p` and `number-value-p` are specified by the
+  representation section 17.8 describes (boxed string, bare CL string, CL
+  number), so their contracts check the result shape and that representation
+  rather than an independent model.
 - Input-domain coverage is not measured.

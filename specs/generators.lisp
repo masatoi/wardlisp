@@ -64,9 +64,13 @@ type."
         collect (ocons-ocar tail)))
 
 (defun wardlisp-number-p (value)
-  "True when VALUE is a wardlisp number: an integer or a double-float (sections
-3.1 and 3.2).  Ratios, complexes and other floats are not wardlisp values."
-  (or (integerp value) (typep value 'double-float)))
+  "True when VALUE is a wardlisp number: an integer or a finite double-float
+(sections 3.1 and 3.2).  Ratios, complexes, other floats, infinities and NaNs
+are not wardlisp values."
+  (or (integerp value)
+      (and (typep value 'double-float)
+           (not (sb-ext:float-infinity-p value))
+           (not (sb-ext:float-nan-p value)))))
 
 (defun wardlisp-datum-p (value)
   "True when VALUE is a wardlisp data value: a number, T, NIL, a symbol (a bare
@@ -397,6 +401,54 @@ one non-ASCII Unicode decimal digit set."
         (2 (format nil "~Ae~A" (digits (1+ (random 2))) (digits 1)))))))
 
 (defspec non-ascii-number-token string (:generator non-ascii-number-text))
+
+(defun random-digits (count)
+  "Return COUNT random ASCII digits as a string."
+  (coerce (loop repeat count collect (code-char (+ 48 (random 10)))) 'string))
+
+(defgenerator float-literal-parts ()
+  "The parts of a float literal of any shape section 2.5.2 admits -- digits and
+a point (\"12.\", \"12.5\", \".5\"), digits and an exponent (\"12e3\"), or both
+-- as (TEXT SIGN INTEGER-DIGITS FRACTION-DIGITS EXPONENT), with an exponent
+from -300 to 300 when there is one."
+  (let* ((sign (random-element '("" "+" "-")))
+         (shape (random 4))
+         (integer-digits (if (= shape 2) "" (random-digits (1+ (random 4)))))
+         (fraction-digits (case shape
+                            (0 "")
+                            ((1 2) (random-digits (1+ (random 4))))
+                            (t "")))
+         (point (if (= shape 3) "" "."))
+         (exponent (if (or (= shape 3) (zerop (random 2))) (- (random 601) 300) nil)))
+    (list (format nil "~A~A~A~A~@[e~D~]" sign integer-digits point fraction-digits exponent)
+          sign integer-digits fraction-digits exponent)))
+
+(defspec float-literal (satisfies consp) (:generator float-literal-parts))
+
+(defparameter *documented-builtins*
+  '(("+" . :any) ("-" . :some) ("*" . :any) ("quotient" . 2) ("mod" . 2) ("/" . 2)
+    ("=" . 2) ("<" . 2) ("<=" . 2) (">" . 2) (">=" . 2)
+    ("cons" . 2) ("car" . 1) ("cdr" . 1) ("list" . :any) ("null?" . 1) ("atom?" . 1)
+    ("length" . 1) ("append" . :any) ("integer?" . 1) ("number?" . 1) ("not" . 1)
+    ("eq?" . 2) ("equal?" . 2) ("print" . 1) ("random" . 1)
+    ("string-append" . :any) ("number->string" . 1) ("string-length" . 1))
+  "The builtins of sections 7 and 17.5 with their arity: a count, :ANY for zero
+or more, :SOME for one or more.")
+
+(defparameter *probe-sources*
+  '("(lambda (x) x)" "car" "(cons 1 2)" "1.5e300" "-0.0" "0" "'()" "t" "\"\"")
+  "Source text for values a random datum does not cover: a closure, a builtin, a
+dotted pair, a huge float, negative zero, zero, the empty list, t and the empty
+string.")
+
+(defgenerator probe-arguments ()
+  "Three argument source texts of any type."
+  (loop repeat 3
+        collect (if (zerop (random 3))
+                    (random-element *probe-sources*)
+                    (datum-source (random-datum :depth 1 :wide-floats t)))))
+
+(defspec builtin-arguments (satisfies consp) (:generator probe-arguments))
 
 (defgenerator evaluate-arguments ()
   "A whole EVALUATE call: a program and every resource limit, small enough that

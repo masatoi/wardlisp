@@ -147,6 +147,13 @@
     (ok (eql 10 (wardlisp-read "10")))
     (ok (signals (wardlisp-read "1e400") 'wardlisp-parse-error))))
 
+(deftest test-float-literal-with-trailing-point
+  "digit+ '.' is a float literal (section 15), not an integer or an error"
+  (ok (eql 1.0d0 (wardlisp-read "1.")))
+  (ok (eql -5.0d0 (wardlisp-read "-5.")))
+  (ok (eql 5.0d0 (wardlisp-read "+5.")))
+  (ok (eql 100000.0d0 (wardlisp-read "1.e5"))))
+
 ;;; --- String literals ---
 
 (deftest test-read-string-basic

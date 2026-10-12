@@ -164,10 +164,12 @@ wardlisp-parse-error: the host reader's own error must not escape the sandbox."
                  ((or reader-error arithmetic-error) ()
                    (error 'wardlisp-parse-error
                           :message (format nil "Float literal out of range: ~a" token))))))
-    (unless (typep value 'double-float)
-      (error 'wardlisp-parse-error
-             :message (format nil "Malformed float literal: ~a" token)))
-    value))
+    ;; The host reader reads digit+ '.' ("1.") as a decimal integer; in
+    ;; wardlisp it is a float literal (section 15 of docs/language-spec.md).
+    (cond ((integerp value) (coerce value 'double-float))
+          ((typep value 'double-float) value)
+          (t (error 'wardlisp-parse-error
+                    :message (format nil "Malformed float literal: ~a" token))))))
 
 (defun ascii-digit-p (ch)
   "Is CH one of the ASCII digits 0-9?  Other Unicode decimal digits are ordinary

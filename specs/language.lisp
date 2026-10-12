@@ -111,39 +111,44 @@ same :RANDOM-SEED gives the same sequence in every evaluation."
                   (ocons-elements first))))))
 
 (defparameter *hostile-host-traps* '(:overflow :invalid :divide-by-zero :underflow)
-  "Float traps unlike the ones wardlisp runs under: underflow traps too.")
+  "Float traps unlike the ones wardlisp runs under: underflow traps too.  Paired
+with rounding toward positive infinity in the host-environment property.")
 
 (defproperty evaluate-ignores-host-dynamic-environment
     ((code program-text)
      (seed (range integer 0 1000)))
-  "Sections 1 and 2: what a program means does not depend on the host's reader
-variables, readtable or floating-point traps.  Under unusual host settings it
-gives the same result and metrics as under standard ones, and the host's float
-traps are as they were afterwards."
+  "Sections 1 and 13.1: what a program means does not depend on the host's
+reader and printer variables, readtable, floating-point traps or rounding mode.
+Under unusual host settings the program, and a fixed float probe whose result
+depends on rounding, give the same results and metrics as under standard ones,
+and the host's float modes are as they were afterwards."
   (:about evaluate)
   (:kind :invariant)
   (:trials (:smoke 20 :normal 200))
-  (multiple-value-bind (expected expected-metrics) (run code :fuel 5000 :random-seed seed)
-    (let ((saved (sb-int:get-floating-point-modes)))
+  (flet ((both ()
+           (multiple-value-bind (value metrics) (run code :fuel 5000 :random-seed seed)
+             (list (print-value value) metrics
+                   (print-value (run "(list (/ 1 3) (* 1.1 1.1) (/ 2.0 3.0))"))))))
+    (let ((expected (both))
+          (saved (sb-int:get-floating-point-modes)))
       (unwind-protect
            (progn
-             (sb-int:set-floating-point-modes :traps *hostile-host-traps*)
-             (multiple-value-bind (actual actual-metrics)
-                 (let ((*read-base* 16)
-                       (*read-default-float-format* 'single-float)
-                       (*print-base* 16)
-                       (*print-radix* t)
-                       (*print-case* :downcase)
-                       (*readtable* (copy-readtable nil)))
-                   (set-macro-character #\1 (lambda (stream char)
-                                              (declare (ignore stream char))
-                                              :host-macro))
-                   (run code :fuel 5000 :random-seed seed))
-               (and (equal (print-value actual) (print-value expected))
-                    (equal actual-metrics expected-metrics)
-                    (null (set-exclusive-or
-                           (getf (sb-int:get-floating-point-modes) :traps)
-                           *hostile-host-traps*)))))
+             (sb-int:set-floating-point-modes :traps *hostile-host-traps*
+                                              :rounding-mode :positive-infinity)
+             (let ((actual (let ((*read-base* 16)
+                                 (*read-default-float-format* 'double-float)
+                                 (*print-base* 16)
+                                 (*print-radix* t)
+                                 (*print-case* :downcase)
+                                 (*readtable* (copy-readtable nil)))
+                             (set-macro-character #\1 (lambda (stream char)
+                                                        (declare (ignore stream char))
+                                                        :host-macro))
+                             (both)))
+                   (modes (sb-int:get-floating-point-modes)))
+               (and (equal actual expected)
+                    (null (set-exclusive-or (getf modes :traps) *hostile-host-traps*))
+                    (eq :positive-infinity (getf modes :rounding-mode)))))
         (apply #'sb-int:set-floating-point-modes saved)))))
 
 ;;; --- Resource limits (section 11) ---
@@ -266,6 +271,100 @@ quoted it evaluates to that symbol."
          (symbol-value-p quoted)
          (string= quoted (string-downcase token))
          (eq 'wardlisp/src/types:wardlisp-name-error (nth-value 2 (run token))))))
+
+(defproperty float-literals-denote-their-decimal-value
+    ((parts float-literal))
+  "Section 2.5.2: every float literal shape -- \"12.\", \"12.5\", \".5\", \"12e3\"
+and their combinations, signed or not -- reads as the double-float nearest to
+the decimal number it writes."
+  (:about evaluate)
+  (:kind :model)
+  (:trials (:smoke 30 :normal 300))
+  (destructuring-bind (text sign integer-digits fraction-digits exponent) parts
+    (let ((exact (* (if (string= sign "-") -1 1)
+                    (+ (if (string= integer-digits "") 0 (parse-integer integer-digits))
+                       (if (string= fraction-digits "")
+                           0
+                           (/ (parse-integer fraction-digits)
+                              (expt 10 (length fraction-digits)))))
+                    (expt 10 (or exponent 0)))))
+      (multiple-value-bind (value metrics) (run text :max-integer (expt 10 400))
+        (and (succeeded-p metrics)
+             (typep value 'double-float)
+             (= value (float exact 1d0)))))))
+
+(defun misuse-arities (arity)
+  "Return the argument counts to try for a builtin of ARITY: the right ones and
+one too many and too few where that is possible."
+  (case arity
+    (:any '(0 1 2 3))
+    (:some '(0 1 2 3))
+    (t (remove-if #'minusp (list (1- arity) arity (1+ arity))))))
+
+(defproperty builtins-contain-misuse
+    ((arguments builtin-arguments))
+  "Sections 1, 7 and 12: every builtin, called with arguments of any type and
+any count, either returns a wardlisp value or fails with one of wardlisp's own
+error types; no host condition escapes as internal-error.  Each trial calls
+every builtin of section 7 and 17.5."
+  (:about evaluate)
+  (:kind :invariant)
+  (:trials (:smoke 10 :normal 100))
+  (loop for (name . arity) in *documented-builtins*
+        always (loop for count in (misuse-arities arity)
+                     always (multiple-value-bind (value metrics)
+                                (run (format nil "(~A~{ ~A~})" name (subseq arguments 0 count))
+                                     :fuel 10000 :max-integer (expt 10 400))
+                              (and (host-errors-contained-p metrics)
+                                   (result-is-wardlisp-value-p value metrics))))))
+
+(defun host-argument (kind)
+  "Return the host argument value KIND names, built at run time so that no NaN
+is ever a literal: a :timeout or :bindings value that is malformed or at an
+edge."
+  (ecase kind
+    (:timeout-huge-integer (expt 10 30))
+    (:timeout-huge-float 1d300)
+    (:timeout-infinity sb-ext:double-float-positive-infinity)
+    (:timeout-nan (sb-int:with-float-traps-masked (:invalid)
+                    (let ((infinity (symbol-value 'sb-ext:double-float-positive-infinity)))
+                      (- infinity infinity))))
+    (:timeout-ratio 1/2)
+    (:timeout-maximum 1000000)
+    (:timeout-zero 0)
+    (:timeout-string "5")
+    (:bindings-dotted '(("x" . 1) . 5))
+    (:bindings-circular (let ((cell (list (cons "x" 1)))) (setf (cdr cell) cell) cell))
+    (:bindings-atom 42)
+    (:bindings-bad-entry '(("x" . 1) 7))
+    (:bindings-bad-name '((x . 1)))
+    (:bindings-nan (list (cons "x" (host-argument :timeout-nan))))
+    (:bindings-infinity (list (cons "x" sb-ext:double-float-positive-infinity)))))
+
+(defproperty evaluate-contains-malformed-host-arguments
+    ((kind (member :timeout-huge-integer :timeout-huge-float :timeout-infinity :timeout-nan
+                   :timeout-ratio :timeout-maximum :timeout-zero :timeout-string
+                   :bindings-dotted :bindings-circular :bindings-atom :bindings-bad-entry
+                   :bindings-bad-name :bindings-nan :bindings-infinity)))
+  "Sections 13.1 and 17.9: a malformed or out-of-range :timeout or :bindings is
+refused as a wardlisp error without signalling and without disturbing the
+process -- the next evaluation still works -- and a valid edge value is
+accepted."
+  (:about evaluate)
+  (:kind :invariant)
+  (:trials (:smoke 15 :normal 60))
+  (let* ((argument (host-argument kind))
+         (timeout-p (member kind '(:timeout-huge-integer :timeout-huge-float
+                                   :timeout-infinity :timeout-nan :timeout-ratio
+                                   :timeout-maximum :timeout-zero :timeout-string)))
+         (type (nth-value 2 (if timeout-p
+                                (run "(+ 1 2)" :timeout argument)
+                                (run "(+ 1 2)" :bindings argument)))))
+    (and (if (member kind '(:timeout-ratio :timeout-maximum))
+             (null type)
+             (member type '(wardlisp/src/types:wardlisp-type-error
+                            wardlisp/src/types:wardlisp-integer-limit-exceeded)))
+         (eql 3 (run "(+ 1 2)")))))
 
 (defproperty float-overflow-is-a-number-limit
     ((left wide-float-literal)

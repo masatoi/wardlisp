@@ -19,6 +19,31 @@
            #:wardlisp-timeout-exceeded))
 (in-package :wardlisp)
 
+(defun finite-double-float-p (value)
+  "True if VALUE is a double-float that is neither an infinity nor a NaN."
+  (and (typep value 'double-float)
+       (not (sb-ext:float-infinity-p value))
+       (not (sb-ext:float-nan-p value))))
+
+(defun proper-list-p (value)
+  "True if VALUE is a finite, NIL-terminated list: not dotted, not circular."
+  (and (listp value)
+       (handler-case (list-length value)
+         (type-error () nil))
+       t))
+
+(defconstant +max-timeout+ 1000000
+  "The largest :timeout EVALUATE accepts, in seconds.  Larger values overflow
+the host's timer arithmetic.")
+
+(defun valid-timeout-p (timeout)
+  "True if TIMEOUT is a real number of seconds greater than zero and at most
++MAX-TIMEOUT+.  A NaN is tested before any comparison, which it would trap."
+  (and (realp timeout)
+       (not (and (floatp timeout) (sb-ext:float-nan-p timeout)))
+       (< 0 timeout)
+       (<= timeout +max-timeout+)))
+
 (defun valid-binding-value-p (value)
   "True if VALUE is a value the host may inject via EVALUATE's :bindings."
   ;; Atoms only: integer, double-float, t, nil, symbol (CL string), or boxed
@@ -26,7 +51,7 @@
   ;; wardlisp values, and compound ocons values are rejected -- the public API
   ;; exports no ocons constructor and their contents would be unvalidated host
   ;; objects.
-  (or (integerp value) (typep value 'double-float) (eq value t) (null value)
+  (or (integerp value) (finite-double-float-p value) (eq value t) (null value)
       (stringp value) (wstring-p value)))
 
 (defun build-binding-frame (bindings ctx)
@@ -34,7 +59,7 @@
 frame. Names are downcased to match reader symbol normalization. Signals
 wardlisp-type-error on malformed input, and wardlisp-integer-limit-exceeded for
 a number beyond CTX's max-integer."
-  (unless (listp bindings)
+  (unless (proper-list-p bindings)
     (error 'wardlisp-type-error :message "evaluate: :bindings must be an alist"))
   (let ((frame nil))
     (dolist (b bindings (nreverse frame))
@@ -62,14 +87,15 @@ a number beyond CTX's max-integer."
 has set.  Reader and printer variables take their standard values (with
 *PRINT-READABLY* false), so neither the meaning of a literal nor the text of an
 error message depends on the caller's *READ-BASE*, readtable or *PRINT-BASE*.
-Overflow, invalid operation and division by zero trap, so they can be
-classified as wardlisp errors; underflow and inexact do not, so a result too
-small to represent rounds to zero.  The caller's float modes are restored
+Floats round to nearest.  Overflow, invalid operation and division by zero
+trap, so they can be classified as wardlisp errors; underflow and inexact do
+not, so a result too small to represent rounds to zero.  The caller's float modes are restored
 afterwards."
   (let ((saved (sb-int:get-floating-point-modes)))
     (unwind-protect
          (progn
-           (sb-int:set-floating-point-modes :traps '(:overflow :invalid :divide-by-zero))
+           (sb-int:set-floating-point-modes :traps '(:overflow :invalid :divide-by-zero)
+                                            :rounding-mode :nearest)
            (with-standard-io-syntax
              (let ((*print-readably* nil))
                (funcall thunk))))
@@ -103,9 +129,10 @@ afterwards."
   (unless (and (integerp max-integer) (plusp max-integer))
     (return-from evaluate-in-sandbox
       (invalid-argument "evaluate: :max-integer must be a positive integer")))
-  (unless (and (realp timeout) (plusp timeout))
+  (unless (valid-timeout-p timeout)
     (return-from evaluate-in-sandbox
-      (invalid-argument "evaluate: :timeout must be a positive number")))
+      (invalid-argument (format nil "evaluate: :timeout must be a positive number of ~
+                                     at most ~d seconds" +max-timeout+))))
   (unless (or (null random-seed)
               (and (integerp random-seed) (not (minusp random-seed))))
     (return-from evaluate-in-sandbox

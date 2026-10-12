@@ -130,6 +130,66 @@ or how its errors are reported"
     (ok (eq 'wardlisp-integer-limit-exceeded (bound-error 1000 :max-integer 10)))
     (ok (eq 'wardlisp-integer-limit-exceeded (bound-error -1000.0d0 :max-integer 10)))))
 
+(defun nan ()
+  "Return a quiet double-float NaN, made at run time with the invalid trap
+masked (constant folding would trap at compile time)."
+  (sb-int:with-float-traps-masked (:invalid)
+    (let ((infinity (symbol-value 'sb-ext:double-float-positive-infinity)))
+      (- infinity infinity))))
+
+(deftest test-bindings-refuse-non-finite-floats
+  "NaN and infinities are not wardlisp numbers"
+  (flet ((bound-error (value)
+           (getf (nth-value 1 (wardlisp:evaluate "(= x x)" :bindings (list (cons "x" value))))
+                 :error-type)))
+    (ok (eq 'wardlisp-type-error (bound-error (nan))))
+    (ok (member (bound-error sb-ext:double-float-positive-infinity)
+                '(wardlisp-type-error wardlisp-integer-limit-exceeded)))))
+
+(deftest test-malformed-bindings-are-type-errors
+  "A :bindings value that is not a proper alist is a type-error"
+  (let ((circular (list (cons "x" 1))))
+    (setf (cdr circular) circular)
+    (dolist (bindings (list '(("x" . 1) . 5) circular 42 '(("x" . 1) 7)))
+      (ok (eq 'wardlisp-type-error
+              (getf (nth-value 1 (wardlisp:evaluate "1" :bindings bindings)) :error-type))))))
+
+(defun timeout-refused-p (kind)
+  "True when EVALUATE refuses the :timeout KIND names as a type-error.  The
+value is built here so that no NaN reaches the values Rove records."
+  (let ((timeout (ecase kind
+                   (:huge-integer (expt 10 30))
+                   (:huge-float 1d300)
+                   (:infinity sb-ext:double-float-positive-infinity)
+                   (:nan (nan))
+                   (:zero 0)
+                   (:negative -1)
+                   (:string "5"))))
+    (eq 'wardlisp-type-error
+        (getf (nth-value 1 (wardlisp:evaluate "1" :timeout timeout)) :error-type))))
+
+(deftest test-timeout-must-be-a-bounded-positive-number
+  "A timeout beyond the maximum, infinite or NaN is refused, and refusing it
+leaves later evaluations working"
+  (dolist (kind '(:huge-integer :huge-float :infinity :nan :zero :negative :string))
+    (ok (timeout-refused-p kind) (string kind)))
+  (ok (eql 3 (wardlisp:evaluate "(+ 1 2)")))
+  (ok (eql 3 (wardlisp:evaluate "(+ 1 2)" :timeout 1/2)))
+  (ok (eql 3 (wardlisp:evaluate "(+ 1 2)" :timeout 1000000))))
+
+(deftest test-evaluate-ignores-host-rounding-mode
+  "Float results do not depend on the host's rounding mode"
+  (let ((expected (list (wardlisp:evaluate "(/ 1 3)") (wardlisp:evaluate "(* 1.1 1.1)")))
+        (saved (sb-int:get-floating-point-modes)))
+    (unwind-protect
+         (progn
+           (sb-int:set-floating-point-modes :rounding-mode :positive-infinity)
+           (ok (equal expected
+                      (list (wardlisp:evaluate "(/ 1 3)") (wardlisp:evaluate "(* 1.1 1.1)"))))
+           (ok (eq :positive-infinity
+                   (getf (sb-int:get-floating-point-modes) :rounding-mode))))
+      (apply #'sb-int:set-floating-point-modes saved))))
+
 ;; --- Output limit ---
 (deftest test-output-limit
   (ok (signals
