@@ -39,7 +39,9 @@
            (error 'wardlisp-parse-error :message
                   (format nil "Unexpected closing parenthesis at ~a"
                           (pos-to-location input pos))))
-          ((char= ch #\') (read-quote input (1+ pos) depth))
+          ;; A quote nests its datum one level deeper, so it counts towards
+          ;; the nesting limit like a list does.
+          ((char= ch #\') (read-quote input (1+ pos) (1+ depth)))
           ((char= ch #\#)
            (error 'wardlisp-parse-error :message
                   (format nil "Reader macros (#) are not allowed at ~a"
@@ -68,7 +70,12 @@
             (setf pos new-pos)))))
 
 (defun read-quote (input pos &optional (depth 0))
-  "Parse quoted expression after quote character."
+  "Parse quoted expression after quote character.  DEPTH counts the quote as a
+nesting level, so '''...x cannot recurse past the nesting limit."
+  (when (> depth +max-parse-depth+)
+    (error 'wardlisp-parse-error :message
+           (format nil "Nesting depth ~d exceeds limit ~d" depth
+                   +max-parse-depth+)))
   (multiple-value-bind (expr new-pos) (read-expr input pos depth)
     (values (list "quote" expr) new-pos)))
 
@@ -129,7 +136,7 @@ the decoded length at +max-string-length+."
       (when (find #\: token)
         (error 'wardlisp-parse-error :message
                (format nil "Package prefix not allowed: ~a at ~a"
-                       token (pos-to-location input start))))
+                       (abbreviate-text token) (pos-to-location input start))))
       (values (parse-token token) pos))))
 
 (defun parse-token (token)
@@ -148,10 +155,58 @@ the decoded length at +max-string-length+."
              (error 'wardlisp-parse-error
                     :message (format nil "Float literal too long (~d chars, max 100)"
                                     (length token))))
-           (let ((*read-default-float-format* 'double-float)
-                   (*read-eval* nil))
-             (read-from-string token)))
+           (parse-float-token token))
           (t lower))))
+
+(defun parse-float-token (token)
+  "Read TOKEN, which FLOAT-TOKEN-P accepted, as the double-float nearest to the
+decimal number it writes, ties to even -- in the subnormal range too, where the
+host's conversion truncates.  The host reader is not used, so no host setting
+can change the result.  A literal beyond double-float range is a
+wardlisp-parse-error; one too small for any double rounds to zero, keeping its
+sign."
+  (multiple-value-bind (negative mantissa exponent) (decimal-token-parts token)
+    (let ((magnitude (decimal-to-double mantissa exponent token)))
+      (if negative (- magnitude) magnitude))))
+
+(defun decimal-token-parts (token)
+  "Split the float TOKEN into a sign, an integer mantissa made of all its digits,
+and the decimal exponent that mantissa needs: the value is
+mantissa * 10^exponent."
+  (let* ((negative (char= #\- (char token 0)))
+         (start (if (find (char token 0) "+-") 1 0))
+         (marker (position-if (lambda (ch) (char-equal ch #\e)) token))
+         (number-part (subseq token start (or marker (length token))))
+         (point (position #\. number-part))
+         (fraction-length (if point (- (length number-part) point 1) 0))
+         (digits (remove #\. number-part))
+         (exponent (if marker (parse-integer token :start (1+ marker)) 0)))
+    (values negative
+            (if (string= digits "") 0 (parse-integer digits))
+            (- exponent fraction-length))))
+
+(defun decimal-to-double (mantissa exponent token)
+  "Return the double-float nearest to MANTISSA * 10^EXPONENT (a non-negative
+value), ties to even.  Signals wardlisp-parse-error, naming TOKEN, when it is
+beyond double-float range."
+  (flet ((out-of-range ()
+           (error 'wardlisp-parse-error
+                  :message (format nil "Float literal out of range: ~a" token))))
+    (when (zerop mantissa)
+      (return-from decimal-to-double 0.0d0))
+    ;; The decimal order of magnitude bounds the work before any exact
+    ;; arithmetic: 1e309 is beyond the range, 1e-400 below half the smallest
+    ;; subnormal.
+    (let ((magnitude (+ exponent (length (princ-to-string mantissa)) -1)))
+      (cond ((> magnitude 309) (out-of-range))
+            ((< magnitude -400) (return-from decimal-to-double 0.0d0))))
+    (or (rational-to-double (* mantissa (expt 10 exponent)))
+        (out-of-range))))
+
+(defun ascii-digit-p (ch)
+  "Is CH one of the ASCII digits 0-9?  Other Unicode decimal digits are ordinary
+symbol characters (section 15 of docs/language-spec.md)."
+  (char<= #\0 ch #\9))
 
 (defun integer-token-p (token)
   "Check if TOKEN looks like an integer."
@@ -159,7 +214,7 @@ the decoded length at +max-string-length+."
                         (or (char= (char token 0) #\-) (char= (char token 0) #\+)))
                    1
                    0)))
-    (and (> (length token) start) (every #'digit-char-p (subseq token start)))))
+    (and (> (length token) start) (every #'ascii-digit-p (subseq token start)))))
 
 (defun float-token-p (token)
   "Check if TOKEN looks like a floating-point number (e.g., 3.14, -0.5, .5, 1e3, 2.5e-10)."
@@ -177,7 +232,7 @@ the decoded length at +max-string-length+."
       (loop while (< i len)
             for ch = (char token i)
             do (cond
-                 ((digit-char-p ch)
+                 ((ascii-digit-p ch)
                   (setf has-digit t)
                   (incf i))
                  ((and (char= ch #\.) (not has-dot) (not has-e))

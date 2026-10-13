@@ -21,7 +21,7 @@
    #:exec-ctx-output #:exec-ctx-max-output
    #:exec-ctx-steps-used #:exec-ctx-max-depth-reached
    #:exec-ctx-max-integer
-   #:exec-ctx-expr-depth #:exec-ctx-max-expr-depth
+   #:exec-ctx-expr-depth #:exec-ctx-max-expr-depth #:exec-ctx-deadline-passed
    ;; Conditions
    #:wardlisp-error #:wardlisp-error-message
    #:wardlisp-parse-error
@@ -37,7 +37,8 @@
    #:wardlisp-internal-error
    #:+uninitialized-binding+
    ;; Helpers
-   #:consume-fuel #:track-depth #:track-expr-depth #:track-cons #:check-integer))
+   #:consume-fuel #:track-depth #:track-expr-depth #:track-cons #:check-integer
+   #:abbreviate-text #:rational-to-double #:call-with-subnormals-kept))
 (in-package :wardlisp/src/types)
 
 ;;; --- Custom cons cell for allocation counting ---
@@ -89,18 +90,20 @@ so the host can tell dialogue text apart from directive tags."
                                (max-expr-depth 1000))))
   "Mutable execution context tracking resource consumption."
   (fuel 10000 :type integer)
-  (max-depth 100 :type fixnum)
+  (max-depth 100 :type integer)
   (current-depth 0 :type fixnum)
   (cons-count 0 :type fixnum)
-  (max-cons 10000 :type fixnum)
+  (max-cons 10000 :type integer)
   (output (make-array 0 :element-type 'character :adjustable t :fill-pointer 0)
           :type (array character (*)))
-  (max-output 1000 :type fixnum)
+  (max-output 1000 :type integer)
   (steps-used 0 :type integer)
   (max-depth-reached 0 :type fixnum)
   (max-integer (expt 2 64) :type integer)
   (expr-depth 0 :type fixnum)
-  (max-expr-depth 1000 :type fixnum))
+  (max-expr-depth 1000 :type fixnum)
+  ;; Set by EVALUATE's timer when :timeout expires; checked at every step.
+  (deadline-passed nil))
 
 ;;; --- Error conditions ---
 
@@ -124,7 +127,10 @@ so the host can tell dialogue text apart from directive tags."
 ;;; --- Resource control helpers ---
 
 (defun consume-fuel (ctx &optional (amount 1))
-  "Consume fuel from context. Signals step-limit-exceeded when exhausted."
+  "Consume fuel from context. Signals step-limit-exceeded when exhausted, and
+timeout-exceeded once EVALUATE's timer has marked the deadline as passed."
+  (when (exec-ctx-deadline-passed ctx)
+    (error 'wardlisp-timeout-exceeded :message "Evaluation timed out"))
   (decf (exec-ctx-fuel ctx) amount)
   (incf (exec-ctx-steps-used ctx) amount)
   (when (< (exec-ctx-fuel ctx) 0)
@@ -161,11 +167,73 @@ so the host can tell dialogue text apart from directive tags."
                             (exec-ctx-cons-count ctx)
                             (exec-ctx-max-cons ctx)))))
 
+(defun call-with-subnormals-kept (thunk)
+  "Call THUNK with the CPU's flush-to-zero and denormals-are-zero modes off, so
+subnormal floats are computed and read as themselves whatever the host has set,
+and restore the host's modes afterwards.  (MXCSR bits 15 and 6 on x86-64; other
+platforms keep their modes.)"
+  #+x86-64
+  (let ((saved (sb-vm:floating-point-modes)))
+    (unwind-protect
+         (progn
+           (setf (sb-vm:floating-point-modes)
+                 (logandc2 saved (logior (ash 1 15) (ash 1 6))))
+           (funcall thunk))
+      (setf (sb-vm:floating-point-modes) saved)))
+  #-x86-64
+  (funcall thunk))
+
+(defun rational-to-double (rational)
+  "Return the double-float nearest to RATIONAL, ties to even, subnormals
+included, or NIL when it is beyond double-float range.  Computed exactly:
+SBCL's own conversion ignores the bits below the rounding point, so a value just
+past a midpoint can round the wrong way."
+  (when (zerop rational)
+    (return-from rational-to-double 0d0))
+  (let* ((magnitude (abs rational))
+         ;; E such that 2^52 <= MAGNITUDE / 2^E < 2^53; the estimate from the
+         ;; integer lengths is off by at most one either way.
+         (e (- (integer-length (numerator magnitude))
+               (integer-length (denominator magnitude))
+               53)))
+    (loop while (>= (* magnitude (expt 2 (- e))) (expt 2 53)) do (incf e))
+    (loop while (< (* magnitude (expt 2 (- e))) (expt 2 52)) do (decf e))
+    ;; Below the normal range the spacing stays 2^-1074.
+    (setf e (max e -1074))
+    (let ((significand (round (* magnitude (expt 2 (- e))))))
+      (when (= significand (expt 2 53))
+        (setf significand (expt 2 52)
+              e (1+ e)))
+      (when (> e 971)
+        (return-from rational-to-double nil))
+      (let ((result (sb-int:with-float-traps-masked (:underflow :inexact)
+                      (scale-float (coerce significand 'double-float) e))))
+        (if (minusp rational) (- result) result)))))
+
+(defun abbreviate-text (text)
+  "Return TEXT, a name or token for an error message, cut to 200 characters with
+\"...\" when longer."
+  (if (> (length text) 200)
+      (concatenate 'string (subseq text 0 200) "...")
+      text))
+
+(defun abbreviate-number (number)
+  "Return NUMBER in plain decimal for an error message -- ~F for a float, as
+wardlisp prints it, rather than the host's 1.0d20.  An integer of more than
+about 200 digits is described by its approximate number of digits instead, so
+that building the message does not cost as much as printing the number."
+  (cond ((floatp number) (abbreviate-text (format nil "~f" number)))
+        ((> (integer-length number) 660)
+         (format nil "~:[~;-~]<an integer of about ~d digits>"
+                 (minusp number) (ceiling (* (integer-length number) (log 2d0 10)))))
+        (t (format nil "~d" number))))
+
 (defun check-integer (ctx value)
   "Check number is within allowed range. Signals integer-limit-exceeded if not.
 Accepts both integers and floats."
   (when (> (abs value) (exec-ctx-max-integer ctx))
     (error 'wardlisp-integer-limit-exceeded
-           :message (format nil "Number ~a exceeds limit ~d"
-                            value (exec-ctx-max-integer ctx))))
+           :message (format nil "Number ~a exceeds limit ~a"
+                            (abbreviate-number value)
+                            (abbreviate-number (exec-ctx-max-integer ctx)))))
   value)

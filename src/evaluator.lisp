@@ -34,10 +34,16 @@
 
 (defun wardlisp-eval (expr env ctx)
   "Evaluate EXPR in ENV with execution context CTX.
-Resolves all tail-calls via trampoline. Always returns a final value."
+Resolves all tail-calls via trampoline. Always returns a final value.
+A trampoline started here runs on top of the caller's host stack, so it counts
+as one level of expression nesting: every host recursion of the evaluator is
+then bounded by the nesting limit, whatever max-depth allows."
   (let ((result (eval-inner expr env ctx)))
     (if (tail-call-p result)
-        (trampoline result ctx)
+        (progn
+          (track-expr-depth ctx 1)
+          (unwind-protect (trampoline result ctx)
+            (track-expr-depth ctx -1)))
         result)))
 
 (defun trampoline (tc ctx)
@@ -88,7 +94,7 @@ Use wardlisp-eval when you need a fully resolved value."
           (eval-compound expr env ctx)
        (track-expr-depth ctx -1)))
     (t (error 'wardlisp-internal-error
-              :message (format nil "Unknown expression type: ~s" expr)))))
+              :message (format nil "Unknown expression type: ~a" (describe-form expr))))))
 
 (defun eval-compound (expr env ctx)
   "Evaluate a compound (list) expression."
@@ -100,7 +106,7 @@ Use wardlisp-eval when you need a fully resolved value."
           ((string= head "if")     (eval-if args env ctx))
           ((string= head "let")    (eval-let args env ctx))
           ((string= head "let*")   (eval-let* args env ctx))
-          ((string= head "lambda") (eval-lambda args env))
+          ((string= head "lambda") (eval-lambda args env ctx))
           ((string= head "define")
            (error 'wardlisp-parse-error
                   :message "define is only allowed at top level or at the beginning of a body"))
@@ -121,7 +127,9 @@ Use wardlisp-eval when you need a fully resolved value."
   (ast-to-value (car args) ctx))
 
 (defun ast-to-value (ast ctx &optional (depth 0))
-  "Convert a quoted AST to a runtime value (ocons chain for lists)."
+  "Convert a quoted AST to a runtime value (ocons chain for lists).  DEPTH counts
+list nesting only: a list's spine is built iteratively, so a long quoted list
+is limited by max-cons, not by the nesting limit."
   (when (> depth +max-parse-depth+)
     (error 'wardlisp-parse-error
            :message "Quoted expression nesting too deep"))
@@ -129,9 +137,19 @@ Use wardlisp-eval when you need a fully resolved value."
         ((eq ast t) t) ((stringp ast) ast)
         ((wstring-p ast)
          (track-cons ctx (max 1 (length (wstring-value ast)))) ast)
-        ((consp ast) (track-cons ctx)
-         (make-ocons (ast-to-value (car ast) ctx (1+ depth))
-                     (ast-to-value (cdr ast) ctx (1+ depth))))
+        ((consp ast)
+         (let ((head nil) (last-cell nil) (rest ast))
+           (loop while (consp rest)
+                 do (track-cons ctx)
+                    (let ((cell (make-ocons (ast-to-value (car rest) ctx (1+ depth)) nil)))
+                      (if last-cell
+                          (setf (ocons-ocdr last-cell) cell)
+                          (setf head cell))
+                      (setf last-cell cell
+                            rest (cdr rest))))
+           (when rest
+             (setf (ocons-ocdr last-cell) (ast-to-value rest ctx (1+ depth))))
+           head))
         (t ast)))
 
 (defun eval-if (args env ctx)
@@ -154,16 +172,17 @@ Then/else branches are in tail position (use eval-inner)."
         (body (rest args)))
     (unless (listp bindings)
       (error 'wardlisp-parse-error :message
-             (format nil "let: bindings must be a list, got ~s" bindings)))
+             (format nil "let: bindings must be a list, got ~a" (describe-form bindings))))
     (dolist (binding bindings)
       (unless (and (listp binding) (= 2 (length binding)))
         (error 'wardlisp-parse-error :message
-               (format nil "let: each binding must be (name expr), got ~s" binding)))
+               (format nil "let: each binding must be (name expr), got ~a"
+                       (describe-form binding))))
       (check-not-boolean "let" (first binding))
       (unless (stringp (first binding))
         (error 'wardlisp-parse-error :message
-               (format nil "let: binding name must be a symbol, got ~s"
-                       (first binding)))))
+               (format nil "let: binding name must be a symbol, got ~a"
+                       (describe-form (first binding))))))
     (let* ((names (mapcar #'first bindings))
            (vals (mapcar (lambda (b) (wardlisp-eval (second b) env ctx)) bindings))
            (new-env (env-extend env names vals)))
@@ -178,41 +197,49 @@ Then/else branches are in tail position (use eval-inner)."
         (current-env env))
     (unless (listp bindings)
       (error 'wardlisp-parse-error :message
-             (format nil "let*: bindings must be a list, got ~s" bindings)))
+             (format nil "let*: bindings must be a list, got ~a" (describe-form bindings))))
     (dolist (binding bindings)
       (unless (and (listp binding) (= 2 (length binding)))
         (error 'wardlisp-parse-error :message
-               (format nil "let*: each binding must be (name expr), got ~s" binding)))
+               (format nil "let*: each binding must be (name expr), got ~a"
+                       (describe-form binding))))
       (check-not-boolean "let*" (first binding))
       (unless (stringp (first binding))
         (error 'wardlisp-parse-error :message
-               (format nil "let*: binding name must be a symbol, got ~s"
-                       (first binding))))
+               (format nil "let*: binding name must be a symbol, got ~a"
+                       (describe-form (first binding)))))
       (let ((val (wardlisp-eval (second binding) current-env ctx)))
         (setf current-env
               (env-extend current-env (list (first binding)) (list val)))))
     (eval-body-forms body current-env ctx)))
 
-(defun eval-lambda (args env)
-  "Evaluate a lambda form, creating a closure."
+(defun check-distinct-names (names message)
+  "Signal a parse-error, MESSAGE followed by the name, if NAMES (strings)
+contains a duplicate.  Linear in the number of names."
+  (let ((seen (make-hash-table :test #'equal)))
+    (dolist (name names)
+      (when (gethash name seen)
+        (error 'wardlisp-parse-error :message (format nil "~a: ~a" message (abbreviate-text name))))
+      (setf (gethash name seen) t))))
+
+(defun eval-lambda (args env ctx)
+  "Evaluate a lambda form, creating a closure.  Charges one step per parameter,
+so re-evaluating a lambda with many parameters costs fuel in proportion to the
+work it does."
   (when (< (length args) 2)
     (error 'wardlisp-arity-error :message "lambda requires params and body"))
   (let ((params (first args))
         (body (rest args)))
     (unless (listp params)
       (error 'wardlisp-parse-error :message
-             (format nil "lambda: params must be a list, got ~s" params)))
+             (format nil "lambda: params must be a list, got ~a" (describe-form params))))
     (dolist (p params)
       (check-not-boolean "lambda" p)
       (unless (stringp p)
         (error 'wardlisp-parse-error :message
-               (format nil "lambda: param must be a symbol, got ~s" p))))
-    (let ((seen nil))
-      (dolist (p params)
-        (when (member p seen :test #'string=)
-          (error 'wardlisp-parse-error :message
-                 (format nil "lambda: duplicate parameter name: ~a" p)))
-        (push p seen)))
+               (format nil "lambda: param must be a symbol, got ~a" (describe-form p)))))
+    (consume-fuel ctx (length params))
+    (check-distinct-names params "lambda: duplicate parameter name")
     (make-closure params body env)))
 
 (defun validate-define-target (target context)
@@ -224,20 +251,15 @@ Then/else branches are in tail position (use eval-inner)."
        (check-not-boolean context name)
        (unless (stringp name)
          (error 'wardlisp-parse-error :message
-                (format nil "~a: function name must be a symbol, got ~s"
-                        context name)))
+                (format nil "~a: function name must be a symbol, got ~a"
+                        context (describe-form name))))
        (dolist (p params)
          (check-not-boolean context p)
          (unless (stringp p)
            (error 'wardlisp-parse-error :message
-                  (format nil "~a: parameter must be a symbol, got ~s"
-                          context p))))
-       (let ((seen nil))
-         (dolist (p params)
-           (when (member p seen :test #'string=)
-             (error 'wardlisp-parse-error :message
-                    (format nil "~a: duplicate parameter name: ~a" context p)))
-           (push p seen)))
+                  (format nil "~a: parameter must be a symbol, got ~a"
+                          context (describe-form p)))))
+       (check-distinct-names params (format nil "~a: duplicate parameter name" context))
        name))
     ((stringp target)
      (check-not-boolean context target)
@@ -245,7 +267,7 @@ Then/else branches are in tail position (use eval-inner)."
     (t
      (check-not-boolean context target)
      (error 'wardlisp-parse-error :message
-            (format nil "Invalid define target: ~s" target)))))
+            (format nil "Invalid define target: ~a" (describe-form target))))))
 
 (defun top-level-update-or-append (env name value)
   "Update an existing user binding or add to the user frame.
@@ -306,15 +328,12 @@ Signals parse-error if a define appears after the first non-define expression."
     (values (nreverse defs) (nreverse exprs))))
 
 (defun ensure-distinct-define-names (defs)
-  "Reject duplicate names in a single internal define block."
-  (let ((seen nil))
-    (dolist (form defs)
-      (let* ((target (second form))
-             (name (validate-define-target target "define")))
-        (when (member name seen :test #'string=)
-          (error 'wardlisp-parse-error
-                 :message (format nil "duplicate define name in body: ~a" name)))
-        (push name seen)))))
+  "Reject duplicate names in a single internal define block, and return the
+names in order.  Linear in the number of definitions."
+  (let ((names (mapcar (lambda (form) (validate-define-target (second form) "define"))
+                       defs)))
+    (check-distinct-names names "duplicate define name in body")
+    names))
 
 (defun eval-body-forms (body env ctx)
   "Evaluate BODY in a definition context.
@@ -326,10 +345,13 @@ Leading define forms are processed with letrec* semantics."
     (if (null defs)
         (eval-sequence exprs env ctx)
         (progn
-          (ensure-distinct-define-names defs)
-          (let* ((names (mapcar (lambda (form)
-                                  (validate-define-target (second form) "define"))
-                                defs))
+          ;; One step per definition and per parameter of a function
+          ;; definition, as for lambda, so a body with many or wide leading
+          ;; defines that runs repeatedly costs fuel in proportion to the work.
+          (consume-fuel ctx (loop for form in defs
+                                  for target = (second form)
+                                  sum (1+ (if (consp target) (length (rest target)) 0))))
+          (let* ((names (ensure-distinct-define-names defs))
                  (placeholders (make-list (length names)
                                           :initial-element +uninitialized-binding+))
                  (local-env (env-extend env names placeholders)))
@@ -394,7 +416,7 @@ Result expressions are in tail position (use eval-inner)."
   (dolist (clause clauses nil)
     (unless (listp clause)
       (error 'wardlisp-parse-error :message
-             (format nil "cond: each clause must be a list, got ~s" clause)))
+             (format nil "cond: each clause must be a list, got ~a" (describe-form clause))))
     (reject-immediate-define-forms (rest clause) "cond")
     (let ((test-result (wardlisp-eval (first clause) env ctx)))
       (when test-result
@@ -457,7 +479,7 @@ Last argument is in tail position (use eval-inner)."
        (when (/= (length params) (length args))
          (error 'wardlisp-arity-error
                 :message (format nil "~a expects ~d arg~:p, got ~d"
-                                 (or (closure-name func) "lambda")
+                                 (abbreviate-text (or (closure-name func) "lambda"))
                                  (length params) (length args))))
        (let ((call-env (env-extend (closure-env func) params args)))
          (make-tail-call :expr (closure-body func) :env call-env :kind :body))))
@@ -470,4 +492,4 @@ Last argument is in tail position (use eval-inner)."
                                (builtin-arity func) (length args))))
      (funcall (builtin-func func) args ctx))
     (t (error 'wardlisp-type-error
-              :message (format nil "Not a function: ~a" (print-value func))))))
+              :message (format nil "Not a function: ~a" (describe-value func))))))

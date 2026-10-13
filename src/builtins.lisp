@@ -1,6 +1,7 @@
 (defpackage :wardlisp/src/builtins
   (:use :cl :wardlisp/src/types :wardlisp/src/env)
-  (:export #:make-initial-env #:print-value))
+  (:export #:make-initial-env #:print-value #:print-value-limited
+           #:describe-value #:describe-form))
 (in-package :wardlisp/src/builtins)
 
 (defun make-initial-env ()
@@ -52,47 +53,94 @@
   "Ensure VALUE is an integer, or signal a type error."
   (unless (integerp value)
     (error 'wardlisp-type-error
-           :message (format nil "~a: expected integer, got ~a" name (print-value value)))))
+           :message (format nil "~a: expected integer, got ~a" name (describe-value value)))))
 
 (defun ensure-number (name value)
   "Ensure VALUE is a number (integer or float), or signal a type error."
   (unless (numberp value)
     (error 'wardlisp-type-error
            :message (format nil "~a: expected number, got ~a"
-                            name (print-value value)))))
+                            name (describe-value value)))))
 
 (defun ensure-ocons (name value)
   "Ensure VALUE is an ocons pair, or signal a type error."
   (unless (ocons-p value)
     (error 'wardlisp-type-error
-           :message (format nil "~a: expected pair, got ~a" name (print-value value)))))
+           :message (format nil "~a: expected pair, got ~a" name (describe-value value)))))
 
 (defun ensure-wstring (name value)
   "Ensure VALUE is a string, or signal a type error."
   (unless (wstring-p value)
     (error 'wardlisp-type-error
-           :message (format nil "~a: expected string, got ~a" name (print-value value)))))
+           :message (format nil "~a: expected string, got ~a" name (describe-value value)))))
 
 ;;; --- Arithmetic ---
 
+(defun call-checking-float-range (name thunk)
+  "Call THUNK, which computes the result of the arithmetic builtin NAME.  A float
+overflow -- a result, or an integer converted to a float, beyond double-float
+range -- is reported as wardlisp-integer-limit-exceeded: such a number exceeds
+every size the language can represent, whatever max-integer allows, and the host
+condition must not escape the sandbox."
+  (handler-case (funcall thunk)
+    (floating-point-overflow ()
+      (error 'wardlisp-integer-limit-exceeded
+             :message (format nil "~a: result exceeds the float range" name)))))
+
+(defun exact-float (number)
+  "Return NUMBER as a double-float: a float as it is, an integer as the nearest
+double, ties to even (the host's conversion rounds some ties the wrong way).
+An integer beyond double-float range is integer-limit-exceeded."
+  (if (floatp number)
+      number
+      (or (rational-to-double number)
+          (error 'wardlisp-integer-limit-exceeded
+                 :message "Number exceeds the float range"))))
+
+(defun mixed-operands (a b)
+  "Return A and B ready for one arithmetic operation: when one is a float, the
+other is converted with EXACT-FLOAT, as the host's float contagion would but
+correctly rounded."
+  (if (or (floatp a) (floatp b))
+      (values (exact-float a) (exact-float b))
+      (values a b)))
+
+(defun checked-reduce (ctx function args initial)
+  "Reduce ARGS with FUNCTION from INITIAL, checking every partial result against
+CTX's max-integer, so a long argument list never builds a number far beyond the
+limit within one step.  An integer meeting a float is converted with
+EXACT-FLOAT first."
+  (let ((result initial))
+    (dolist (a args (check-integer ctx result))
+      (multiple-value-bind (x y) (mixed-operands result a)
+        (setf result (check-integer ctx (funcall function x y)))))))
+
 (defun builtin-add (args ctx)
-  "Built-in + function. Variadic addition."
+  "Built-in + function. Variadic addition.  Each partial sum is checked against
+max-integer."
   (dolist (a args) (ensure-number "+" a))
-  (check-integer ctx (reduce #'+ args :initial-value 0)))
+  (call-checking-float-range
+   "+" (lambda () (checked-reduce ctx #'+ args 0))))
 
 (defun builtin-sub (args ctx)
-  "Built-in - function. Unary negation or variadic subtraction."
+  "Built-in - function. Unary negation or variadic subtraction.  Each partial
+difference is checked against max-integer."
   (when (null args)
     (error 'wardlisp-arity-error :message "- requires at least 1 argument"))
   (dolist (a args) (ensure-number "-" a))
-  (check-integer ctx (if (= 1 (length args))
-                         (- (first args))
-                         (reduce #'- args))))
+  (call-checking-float-range
+   "-" (lambda ()
+         (if (= 1 (length args))
+             (check-integer ctx (- (first args)))
+             (checked-reduce ctx #'- (rest args) (first args))))))
 
 (defun builtin-mul (args ctx)
-  "Built-in * function. Variadic multiplication."
+  "Built-in * function. Variadic multiplication.  Each partial product is
+checked against max-integer, so (apply * long-list) never multiplies numbers
+far beyond the limit."
   (dolist (a args) (ensure-number "*" a))
-  (check-integer ctx (reduce #'* args :initial-value 1)))
+  (call-checking-float-range
+   "*" (lambda () (checked-reduce ctx #'* args 1))))
 
 (defun builtin-quotient (args ctx)
   "Built-in quotient function. Integer division (truncate toward zero)."
@@ -119,9 +167,16 @@ divisible, otherwise returns float."
     (if (and (integerp a) (integerp b) (zerop (rem a b)))
         (check-integer ctx (cl:/ a b))
         (check-integer ctx
-                       (coerce (cl:/ (coerce a 'double-float)
-                                     (coerce b 'double-float))
-                               'double-float)))))
+                       (call-checking-float-range
+                        "/" (lambda ()
+                              ;; Two integers divide exactly first, so only a
+                              ;; quotient beyond the float range overflows,
+                              ;; not an operand.
+                              (if (and (integerp a) (integerp b))
+                                  (or (rational-to-double (cl:/ a b))
+                                      (error 'wardlisp-integer-limit-exceeded
+                                             :message "/: result exceeds the float range"))
+                                  (cl:/ (exact-float a) (exact-float b)))))))))
 
 ;;; --- Comparison ---
 
@@ -209,18 +264,18 @@ Returns nil if either argument is not a number."
   (if (ocons-p (first args)) nil t))
 
 (defun builtin-length (args ctx)
-  "Built-in length function. Count elements in an ocons list."
-  (declare (ignore ctx))
+  "Built-in length function. Count elements in an ocons list, subject to
+max-integer like any other number."
   (let ((lst (first args)) (count 0))
     (unless (or (null lst) (ocons-p lst))
       (error 'wardlisp-type-error :message
-             (format nil "length: expected list, got ~a" (print-value lst))))
+             (format nil "length: expected list, got ~a" (describe-value lst))))
     (loop while (ocons-p lst)
           do (incf count) (setf lst (ocons-ocdr lst)))
     (when lst
       (error 'wardlisp-type-error :message
-             (format nil "length: improper list with tail ~a" (print-value lst))))
-    count))
+             (format nil "length: improper list with tail ~a" (describe-value lst))))
+    (check-integer ctx count)))
 
 (defun builtin-append (args ctx)
   "Built-in append function. Concatenate zero or more lists."
@@ -239,7 +294,7 @@ Returns nil if either argument is not a number."
        (unless (ocons-p lst)
          (error 'wardlisp-type-error :message
                 (format nil "append: expected list, got ~a"
-                        (print-value lst))))
+                        (describe-value lst))))
        (let* ((head (progn (track-cons ctx) (make-ocons (ocons-ocar lst) nil)))
               (current head))
          (setf lst (ocons-ocdr lst))
@@ -254,7 +309,7 @@ Returns nil if either argument is not a number."
          (when (and lst (not (null lst)))
            (error 'wardlisp-type-error :message
                   (format nil "append: improper list with tail ~a"
-                          (print-value lst))))
+                          (describe-value lst))))
          (setf (ocons-ocdr current) tail)
          head))))
 
@@ -278,12 +333,14 @@ Returns nil if either argument is not a number."
         nil)))
 
 (defun builtin-equal-p (args ctx)
-  "Built-in equal? function. Deep structural equality."
-  (declare (ignore ctx))
-  (if (wardlisp-equal (first args) (second args) 0) t nil))
+  "Built-in equal? function. Deep structural equality.  Each pair of cells
+compared costs one step, so comparing structure that is shared many times over
+is bounded by fuel."
+  (if (wardlisp-equal (first args) (second args) 0 ctx) t nil))
 
-(defun wardlisp-equal (a b depth)
-  "Structural comparison: iterates cdr-spine, recurses car-branches."
+(defun wardlisp-equal (a b depth ctx)
+  "Structural comparison: iterates cdr-spine, recurses car-branches.  Consumes
+one step of CTX's fuel per pair of cells compared."
   (loop
     (when (> depth 10000)
       (error 'wardlisp-recursion-limit-exceeded :message
@@ -295,19 +352,24 @@ Returns nil if either argument is not a number."
       ((and (wstring-p a) (wstring-p b))
        (return (string= (wstring-value a) (wstring-value b))))
       ((and (ocons-p a) (ocons-p b))
-       (unless (wardlisp-equal (ocons-ocar a) (ocons-ocar b) (1+ depth))
+       (consume-fuel ctx)
+       (unless (wardlisp-equal (ocons-ocar a) (ocons-ocar b) (1+ depth) ctx)
          (return nil))
+       ;; Following the cdr is iteration, not nesting: DEPTH is unchanged.
        (setf a (ocons-ocdr a))
-       (setf b (ocons-ocdr b))
-       (incf depth))
+       (setf b (ocons-ocdr b)))
       (t (return nil)))))
 
 (defun builtin-print (args ctx)
-  "Built-in print function. Append string representation to output buffer."
-  (let ((value (first args))
-        (output (exec-ctx-output ctx)))
-    (let ((str (print-value value)))
-      (when (> (+ (length output) (length str) 1) (exec-ctx-max-output ctx))
+  "Built-in print function. Append string representation to output buffer.
+The value is printed only as far as the output budget allows, so a value whose
+printed form is enormous stops at the limit instead of being built whole."
+  (let* ((value (first args))
+         (output (exec-ctx-output ctx))
+         (budget (- (exec-ctx-max-output ctx) (length output) 1)))
+    (multiple-value-bind (str complete)
+        (if (minusp budget) (values "" nil) (print-value-limited value budget))
+      (unless complete
         (error 'wardlisp-output-limit-exceeded
                :message "Output limit exceeded"))
       (loop for ch across str do (vector-push-extend ch output))
@@ -323,7 +385,7 @@ EVALUATE :random-seed keyword for reproducible sequences."
     (ensure-integer "random" n)
     (unless (plusp n)
       (error 'wardlisp-type-error
-             :message (format nil "random: expected positive integer, got ~a" n)))
+             :message (format nil "random: expected positive integer, got ~a" (describe-value n))))
     (random n)))
 
 ;;; --- String operations ---
@@ -349,17 +411,23 @@ Charges memory proportional to the result length."
       (make-wstring s))))
 
 (defun builtin-string-length (args ctx)
-  "Built-in string-length. Return the number of characters in a string."
-  (declare (ignore ctx))
+  "Built-in string-length. Return the number of characters in a string, subject
+to max-integer like any other number."
   (let ((s (first args)))
     (ensure-wstring "string-length" s)
-    (length (wstring-value s))))
+    (check-integer ctx (length (wstring-value s)))))
 
 ;;; --- Value printing ---
 
 (defun format-float (value)
-  "Format a float for wardlisp output. Removes trailing zeros but keeps at least one decimal."
-  (let ((s (format nil "~f" value)))
+  "Format a float for wardlisp output. Removes trailing zeros but keeps at least one decimal.
+A subnormal prints as itself whatever flush-to-zero modes the host has set, and
+the host's float traps (inexact, say) do not stop the printing."
+  (let ((s (call-with-subnormals-kept
+            (lambda ()
+              (sb-int:with-float-traps-masked (:inexact :underflow :overflow :invalid
+                                               :divide-by-zero)
+                (format nil "~f" value))))))
     (let ((dot-pos (position #\. s)))
       (if dot-pos
           (let ((end (length s)))
@@ -369,38 +437,120 @@ Charges memory proportional to the result length."
             (subseq s 0 end))
           s))))
 
+(defvar *print-remaining* nil
+  "Characters WRITE-VALUE may still produce, or NIL for no limit.")
+
+(define-condition print-limit-reached (error) ()
+  (:documentation "Signalled by EMIT when *PRINT-REMAINING* runs out."))
+
+(defun emit (text stream)
+  "Write TEXT to STREAM, charging it to *PRINT-REMAINING*.  When TEXT would
+overdraw the budget, only the part that fits is written and PRINT-LIMIT-REACHED
+is signalled, so a long atom is cut rather than dropped."
+  (when *print-remaining*
+    (when (> (length text) *print-remaining*)
+      (write-string text stream :end *print-remaining*)
+      (setf *print-remaining* 0)
+      (error 'print-limit-reached))
+    (decf *print-remaining* (length text)))
+  (write-string text stream))
+
+(defun write-value (value stream depth)
+  "Write VALUE's printed form to STREAM through EMIT.  Every node writes at least
+one character, so the work done is bounded by the characters written."
+  (if (> depth 100)
+      (emit "..." stream)
+      (cond ((null value) (emit "nil" stream))
+            ((eq value t) (emit "t" stream))
+            ((integerp value) (emit (format nil "~d" value) stream))
+            ((floatp value) (emit (format-float value) stream))
+            ((wstring-p value) (emit (print-wstring value) stream))
+            ((stringp value) (emit value stream))
+            ((ocons-p value) (write-ocons value stream (1+ depth)))
+            ((closure-p value)
+             (emit "#<closure" stream)
+             (when (closure-name value)
+               (emit " " stream)
+               (emit (closure-name value) stream))
+             (emit ">" stream))
+            ((builtin-p value)
+             (emit (format nil "#<builtin ~a>" (builtin-name value)) stream))
+            (t (emit "#<unknown>" stream)))))
+
+(defun print-value-limited (value limit)
+  "Return the printed form of VALUE cut to at most LIMIT characters, and as a
+second value whether it is complete.  The work done is bounded by LIMIT, however
+much structure VALUE shares."
+  (let ((stream (make-string-output-stream))
+        (*print-remaining* limit))
+    (handler-case (progn (write-value value stream 0)
+                         (values (get-output-stream-string stream) t))
+      (print-limit-reached ()
+        (values (get-output-stream-string stream) nil)))))
+
+(defun describe-with (writer object)
+  "Return OBJECT as WRITER writes it, for an error message: at most 200
+characters, with \"...\" when cut."
+  (let ((stream (make-string-output-stream))
+        (*print-remaining* 200))
+    (handler-case (progn (funcall writer object stream 0)
+                         (get-output-stream-string stream))
+      (print-limit-reached ()
+        (concatenate 'string (get-output-stream-string stream) "...")))))
+
+(defun describe-value (value)
+  "Return the runtime VALUE's printed form for an error message: at most 200
+characters, with \"...\" when cut."
+  (describe-with #'write-value value))
+
+(defun write-form (form stream depth)
+  "Write the source FORM -- a reader AST, whose lists are CL lists -- to STREAM in
+wardlisp syntax through EMIT."
+  (cond ((> depth 100) (emit "..." stream))
+        ((consp form)
+         (emit "(" stream)
+         (write-form (car form) stream (1+ depth))
+         (let ((rest (cdr form)))
+           (loop while (consp rest)
+                 do (emit " " stream)
+                    (write-form (car rest) stream (1+ depth))
+                    (setf rest (cdr rest)))
+           (when rest
+             (emit " . " stream)
+             (write-form rest stream (1+ depth))))
+         (emit ")" stream))
+        (t (write-value form stream depth))))
+
+(defun describe-form (form)
+  "Return the source FORM in wardlisp syntax for an error message: at most 200
+characters, with \"...\" when cut."
+  (describe-with #'write-form form))
+
 (defun print-value (value &optional (depth 0))
   "Convert a runtime value to its string representation.
-Limits nesting depth to prevent host stack overflow."
-  (if (> depth 100)
-      "..."
-      (cond ((null value) "nil") ((eq value t) "t")
-            ((integerp value) (format nil "~d" value))
-            ((floatp value) (format-float value))
-            ((wstring-p value) (print-wstring value))
-            ((stringp value) value)
-            ((ocons-p value) (print-ocons value (1+ depth)))
-            ((closure-p value)
-             (format nil "#<closure~@[ ~a~]>" (closure-name value)))
-            ((builtin-p value) (format nil "#<builtin ~a>" (builtin-name value)))
-            (t (format nil "#<unknown>")))))
+Limits nesting depth to prevent host stack overflow.  The text is not bounded
+otherwise: a value that shares structure, such as (list y y) nested N deep, has
+a printed form exponential in N.  Inside evaluation use PRINT-VALUE-LIMITED."
+  (let ((*print-remaining* nil))
+    (with-output-to-string (stream)
+      (write-value value stream depth))))
 
-(defun print-ocons (cell &optional (depth 0))
-  "Print an ocons chain as a list or dotted pair."
+(defun write-ocons (cell stream depth)
+  "Write an ocons chain to STREAM as a list or dotted pair."
   (if (> depth 100)
-      "(...)"
-      (with-output-to-string (s)
-        (write-char #\( s)
-        (write-string (print-value (ocons-ocar cell) depth) s)
+      (emit "(...)" stream)
+      (progn
+        (emit "(" stream)
+        (write-value (ocons-ocar cell) stream depth)
         (let ((rest (ocons-ocdr cell)))
           (loop while (ocons-p rest)
-                do (write-char #\  s)
-                   (write-string (print-value (ocons-ocar rest) depth) s)
+                do (emit " " stream)
+                   (write-value (ocons-ocar rest) stream depth)
                    (setf rest (ocons-ocdr rest)))
           (unless (null rest)
-            (write-string " . " s)
-            (write-string (print-value rest depth) s)))
-        (write-char #\) s))))
+            (emit " . " stream)
+            (write-value rest stream depth)))
+        (emit ")" stream))))
 
 (defun print-wstring (ws)
   "Print a boxed string as a double-quoted literal, re-escaping \" \\ newline tab."

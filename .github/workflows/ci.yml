@@ -1,0 +1,87 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  LISP: sbcl-bin/2.5.0
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Roswell
+        run: |
+          curl -L https://raw.githubusercontent.com/roswell/roswell/master/scripts/install-for-ci.sh | sh
+          echo "$HOME/.roswell/bin" >> "$GITHUB_PATH"
+
+      - name: Install Rove
+        run: ros install rove
+
+      - name: Run tests
+        run: rove wardlisp.asd
+
+  # Conformance to the executable specification: the wardlisp/specs bundle
+  # (docs/specs.md) of cl-spec Function Specs and Properties on the public API,
+  # checked through cl-spec's Lisp API with fixed seeds.  Kept apart from
+  # `test` so the default suite needs no cl-spec.
+  specs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      # cl-spec is not in Quicklisp.  Pin the commit the bundle was written and
+      # checked against; bump it deliberately, in its own commit.
+      CL_SPEC_REPOSITORY: https://github.com/masatoi/cl-spec.git
+      CL_SPEC_REVISION: 36b629c6f54f6cde896c7c298551fb0ca5f11fec
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Roswell
+        run: |
+          curl -L https://raw.githubusercontent.com/roswell/roswell/master/scripts/install-for-ci.sh | sh
+          echo "$HOME/.roswell/bin" >> "$GITHUB_PATH"
+
+      - name: Fetch cl-spec at the pinned revision
+        run: |
+          dir="$HOME/.roswell/local-projects/masatoi/cl-spec"
+          git init --quiet "$dir"
+          git -C "$dir" fetch --quiet --depth 1 "$CL_SPEC_REPOSITORY" "$CL_SPEC_REVISION"
+          git -C "$dir" checkout --quiet --detach FETCH_HEAD
+          test "$(git -C "$dir" rev-parse HEAD)" = "$CL_SPEC_REVISION"
+
+      # The script also refuses to run unless wardlisp was loaded from this
+      # checkout; this keeps a second copy off the search path to begin with.
+      - name: No other wardlisp is installed
+        run: |
+          for dir in "$HOME"/.roswell/local-projects/wardlisp \
+                     "$HOME"/.roswell/local-projects/*/wardlisp; do
+            if [ -e "$dir" ]; then echo "another wardlisp is installed: $dir"; exit 1; fi
+          done
+
+      - name: Check the specification with fixed seeds
+        run: |
+          WARDLISP_SPECS_REPORT=specs-check.sexp \
+            timeout 900 ros run --load scripts/check-specs.lisp
+
+      # Every known-wrong implementation must make some check fail: a bundle
+      # that passes them is not evidence about the right one either.
+      - name: Negative control
+        run: |
+          WARDLISP_SPECS_MODE=negative-control WARDLISP_SPECS_REPORT=specs-negative-control.sexp \
+            timeout 900 ros run --load scripts/check-specs.lisp
+
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: specs-reports
+          path: specs-*.sexp
+          if-no-files-found: warn

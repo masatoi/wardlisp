@@ -30,7 +30,7 @@ WardLisp is a Lisp-1 (like Scheme: functions and variables share a single namesp
 
 ### Special Forms
 
-`quote`, `if`, `let` (sequential binding), `lambda`, `define`, `cond`, `and`, `or`, `begin`, `apply`
+`quote`, `if`, `let` (parallel binding), `let*` (sequential binding), `lambda`, `define`, `cond`, `and`, `or`, `begin`, `apply`
 
 ### Builtins
 
@@ -39,7 +39,7 @@ WardLisp is a Lisp-1 (like Scheme: functions and variables share a single namesp
 - **Lists**: `cons`, `car`, `cdr`, `list`, `null?`, `atom?`, `length`, `append`
 - **Equality**: `eq?` (shallow), `equal?` (deep structural)
 - **Strings**: `string-append`, `number->string`, `string-length`
-- **Other**: `not`, `print`
+- **Other**: `not`, `print`, `random`
 
 ### Strings
 
@@ -73,19 +73,31 @@ Tail calls in supported positions (if branches, let/begin body, cond clauses, an
 
 ### What's Intentionally Missing
 
-No macros, no mutation (`set!`/`setf`), no loops, no `eval`, no I/O, no packages, no reader macros, no FFI, no threads, no randomness.
+No macros, no mutation (`set!`/`setf`), no loops, no `eval`, no I/O, no packages, no reader macros, no FFI, no threads, and no randomness beyond `(random n)`, which is reproducible under `evaluate`'s `:random-seed`.
 
 ## Resource Limits
 
 Every evaluation runs under hard limits. Exceeding any limit immediately halts execution with a specific error.
+Every failure a program can cause is reported as one of WardLisp's own error types; no host error escapes the evaluator.
 
 | Resource | Default | Error |
 |----------|---------|-------|
-| Computation steps (fuel) | 10,000 | `step-limit-exceeded` |
+| Computation steps (fuel) | 1,000,000 | `step-limit-exceeded` |
 | Recursion depth | 100 | `recursion-limit-exceeded` |
 | Cons cells allocated | 10,000 | `memory-limit-exceeded` |
 | Integer absolute value | 2^64 | `integer-limit-exceeded` |
 | Print output | 1,000 chars | `output-limit-exceeded` |
+| Wall-clock time | 5 seconds | `timeout-exceeded` |
+
+The default fuel of 1,000,000 steps is spent in a few tens of milliseconds by
+typical programs. The work behind one step is bounded by the limits: `equal?`
+costs a step per pair it compares, `print` stops at the output limit, error
+messages cut values and numbers at 200 characters, list and string operations
+are proportional to at most `max-cons`, and arithmetic checks every partial
+result against `max-integer` (a program repeating `apply` on long lists took a
+few seconds for 1,000,000 steps, and can reach the default timeout). It also grows with the size of the
+program, since looking up a variable scans the bindings in scope. The timeout is
+what bounds wall-clock time.
 
 ## Usage
 
@@ -95,17 +107,18 @@ Every evaluation runs under hard limits. Exceeding any limit immediately halts e
 ;; Basic evaluation
 (wardlisp:evaluate "(+ 1 2)")
 ;; => 3
-;; => (:steps-used 7 :max-depth-reached 0 :cons-allocated 0 ...)
+;; => (:steps-used 8 :max-depth-reached 0 :cons-allocated 0 ...)
 
 ;; With custom limits
-(wardlisp:evaluate "(fact 20)"
-  :fuel 100000
+(wardlisp:evaluate "(define (fact n) (if (= n 0) 1 (* n (fact (- n 1))))) (fact 20)"
+  :fuel 10000
   :max-depth 200)
+;; => 2432902008176640000
 
 ;; Resource exhaustion is safe
 (wardlisp:evaluate "((lambda (f) (f f)) (lambda (f) (f f)))")
 ;; => NIL
-;; => (:error-type :step-limit-exceeded :error-message "..." ...)
+;; => (... :error-type wardlisp:wardlisp-step-limit-exceeded :error-message "..." ...)
 ```
 
 The `evaluate` function returns two values: the result (or `NIL` on error) and a metrics plist containing `:steps-used`, `:max-depth-reached`, `:cons-allocated`, `:output`, `:fuel-remaining`, `:error-type`, and `:error-message`.
@@ -172,9 +185,18 @@ Requires [SBCL](http://www.sbcl.org/) and [Roswell](https://roswell.github.io/) 
 # Run tests
 rove wardlisp.asd
 
+# Check the executable contracts (needs cl-spec; see docs/specs.md)
+ros run --load scripts/check-specs.lisp
+
 # Lint
-mallet src/*.lisp
+mallet src/*.lisp specs/*.lisp scripts/*.lisp
 ```
+
+The public API carries [cl-spec](https://github.com/masatoi/cl-spec) contracts
+derived from `docs/language-spec.md` (system `wardlisp/specs`, opt-in). CI runs
+the Rove suite and checks the contracts with fixed seeds, including a negative
+control that each known-wrong implementation must fail. See
+[docs/specs.md](docs/specs.md).
 
 ## License
 
